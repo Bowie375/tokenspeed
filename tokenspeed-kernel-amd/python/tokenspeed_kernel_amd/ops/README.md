@@ -685,13 +685,15 @@ count while the weight traffic does not.
 
 Prefill instead runs the wide large-M WMMA schedule from
 `gfx1250/gemm/fp16/mm.py`, a `256 x 256` tile on eight warps in 128-wide K
-steps through a double-buffered TDM pipeline, with no split at all. The kernel
-writes the three regions straight from the accumulator with one masked store
-each, so FP32 router logits reach memory without a round trip through BF16. A
-tile can straddle a region boundary, because the boundaries are 128-column
-aligned while the tile is 256 wide, so the masks rather than the tile index decide
-where a column belongs. SiTU is a second launch, as on gfx950: the gate and
-up halves sit 768 columns apart, so no tile holds both.
+steps through a double-buffered TDM pipeline, with no split at all. Before
+storing, the kernel redistributes the accumulator so neighboring lanes cover
+adjacent output columns, which coalesces the BF16 latent and shared stores. It
+then writes the three regions with one masked store each, so FP32 router logits
+reach memory without a round trip through BF16. A tile can straddle a region
+boundary, because the boundaries are 128-column aligned while the tile is 256
+wide, so the masks rather than the tile index decide where a column belongs.
+SiTU is a second launch, as on gfx950: the gate and up halves sit 768 columns
+apart, so no tile holds both.
 
 Both kernels mask partial row tiles, so they accept any token count.
 
