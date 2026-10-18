@@ -27,10 +27,40 @@ from tokenspeed_kernel.ops.activation.triton import (
     add3,
     relu2,
 )
+from tokenspeed_kernel.ops.activation.triton import sigmoid_mul as triton_sigmoid_mul
 from tokenspeed_kernel.ops.activation.triton import silu_and_mul as triton_silu_and_mul
 from tokenspeed_kernel.ops.activation.triton import situ_and_mul as triton_situ_and_mul
 from tokenspeed_kernel.platform import current_platform, pdl_enabled
 from tokenspeed_kernel.registry import error_fn
+
+
+def sigmoid_mul(
+    x: torch.Tensor,
+    gate: torch.Tensor,
+    head_bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Overwrite attention output with x*sigmoid(gate+optional head bias).
+
+    Args:
+        x: Contiguous floating-point [tokens,width] attention output.
+        gate: Same-dtype/device [tokens,width] or [tokens,heads,head_dim] logits.
+            Last-dimension columns are dense; gate rows and heads may be strided.
+        head_bias: Optional contiguous floating [heads] bias. With a flat gate,
+            width must be divisible by its head count.
+
+    Returns:
+        x itself, updated in place using FP32 gate and multiplication arithmetic,
+        then rounded once to its original dtype. Gate and bias remain unchanged.
+        GPU uses the existing Triton implementation, including its PDL contract;
+        Ascend uses its fused implementation without CUDA launch dependencies.
+    """
+    if current_platform().is_npu:
+        from tokenspeed_kernel.ops.activation.ascend import (
+            sigmoid_mul as npu_sigmoid_mul,
+        )
+
+        return npu_sigmoid_mul(x, gate, head_bias=head_bias)
+    return triton_sigmoid_mul(x, gate, head_bias=head_bias)
 
 
 def silu_and_mul(
@@ -75,6 +105,7 @@ def situ_and_mul(
 
 
 __all__ = [
+    "sigmoid_mul",
     "add3",
     "relu2",
     "silu_and_mul",

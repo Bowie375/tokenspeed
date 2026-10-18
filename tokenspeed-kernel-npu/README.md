@@ -78,6 +78,11 @@ shared layernorm API. It supports independent head statistics, shared head
 weights, SiLU/sigmoid gates and strided projection views. See the
 [gated RMSNorm contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/layernorm/README.md#gated-grouped-rmsnorm-on-ascend).
 
+Full-attention output sigmoid gating uses a fused Ascend kernel through the
+shared activation API. It updates attention output in place, supports packed
+strided gate views and optional head bias, and uses FP32 arithmetic. See the
+[sigmoid gate contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/activation/README.md#full-attention-output-sigmoid-gate).
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install
