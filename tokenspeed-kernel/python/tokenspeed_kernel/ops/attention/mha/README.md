@@ -63,5 +63,6 @@ this initial validation scope; set `TOKENSPEED_MM_ENABLE_ENCODER_CUDA_GRAPH=0`.
 
 Run `python -m pytest -q tokenspeed-kernel-npu/test/test_vision_attention.py` on
 Ascend. Coverage includes noncausality, image isolation, ragged/empty segments,
-strides, explicit scale, rank restoration and both supported dtypes against
+strides, explicit scale through the full runtime module, rank restoration and
+both supported dtypes against
 an independent CPU FP64 reference.

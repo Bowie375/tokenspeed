@@ -128,3 +128,38 @@ def test_unsupported_external_metadata_rejected(argument):
             **{argument: torch.ones(1, device="npu")}
         )
     torch.testing.assert_close(q, torch.zeros_like(q), rtol=0, atol=0)
+
+
+@torch.inference_mode()
+def test_encoder_module_preserves_explicit_softmax_scale():
+    from tokenspeed.runtime.distributed.mapping import Mapping
+    from tokenspeed.runtime.layers.attention.mm_encoder_attention import (
+        MultimodalEncoderAttention,
+    )
+    from tokenspeed.runtime.model_loader.utils import set_default_torch_dtype
+
+    with torch.device("npu"), set_default_torch_dtype(torch.bfloat16):
+        module = MultimodalEncoderAttention(
+            embed_dim=128,
+            num_heads=2,
+            mapping=Mapping(rank=0, world_size=1),
+            mm_attention_backend="ascend",
+        ).eval()
+        identity = torch.eye(128, dtype=torch.bfloat16)
+        module.qkv_proj.weight.copy_(identity.repeat(3, 1))
+        module.qkv_proj.bias.zero_()
+        module.proj.weight.copy_(identity)
+        module.proj.bias.zero_()
+    generator = torch.Generator().manual_seed(42)
+    x = (torch.randn(1, 3, 128, generator=generator) * 0.5).bfloat16()
+    scale = 0.75
+    actual = module(x.npu(), softmax_scale=scale)
+    rows = x.double().reshape(3, 2, 64).transpose(0, 1)
+    expected = (
+        ((rows @ rows.transpose(-1, -2) * scale).softmax(-1) @ rows)
+        .transpose(0, 1)
+        .reshape_as(x)
+    )
+    torch.testing.assert_close(
+        actual.cpu(), expected.bfloat16(), rtol=2**-6, atol=2**-8
+    )

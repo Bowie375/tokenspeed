@@ -496,6 +496,9 @@ class MultimodalEncoderAttention(nn.Module):
         position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
         rotary_pos_emb_cos: torch.Tensor | None = None,
         rotary_pos_emb_sin: torch.Tensor | None = None,
+        *,
+        softmax_scale: float | None = None,
+        cu_seqlens_cpu: list[int] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         r"""
@@ -613,14 +616,11 @@ class MultimodalEncoderAttention(nn.Module):
             cu_seqlens=cu_seqlens,
             bsz=bsz,
             seq_len=s,
+            softmax_scale=softmax_scale,
             max_seqlen=max_seqlen,
             sequence_lengths=sequence_lengths,
             workspace_buffer=self._workspace_buffer,
-            **(
-                {"cu_seqlens_cpu": kwargs["cu_seqlens_cpu"]}
-                if "cu_seqlens_cpu" in kwargs
-                else {}
-            ),
+            cu_seqlens_cpu=cu_seqlens_cpu,
         )
 
         output = rearrange(output, "(b s) ... h d -> b s ... (h d)", b=bsz)
