@@ -585,6 +585,23 @@ tokenspeed serve Qwen/Qwen3-30B-A3B \
   --port 8000
 ```
 
+### Qwen3.5 Ascend bring-up
+
+The dense Qwen3.5 constructor creates its auxiliary stream through the active
+device module, so construction on Ascend does not require CUDA. The focused
+construction and embedding regression test is:
+
+```bash
+python -m pytest -q test/runtime/models/test_qwen35_npu_construction.py
+```
+
+This test covers construction with full-attention and hybrid GDN layers, not
+prefill, decode, or graph capture. Qwen3.5 still requires validation and Ascend
+implementations for its GDN computation and state helpers before serving; the
+Qwen3-0.6B recipe above does not establish Qwen3.5 support. For text-only
+bring-up, pass `--language-model-only` to skip the vision encoder. The MoE
+shared-expert stream path remains CUDA-specific.
+
 ## Qwen3.8
 
 Qwen3.8 shares the hybrid linear-attention (GDN) / full-attention layer

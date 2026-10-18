@@ -24,9 +24,6 @@ from __future__ import annotations
 
 import torch
 from tokenspeed_kernel.ops.layernorm.triton import (
-    add_rmsnorm,
-)
-from tokenspeed_kernel.ops.layernorm.triton import (
     gated_residual_combine_norm as _gated_residual_combine_norm,
 )
 from tokenspeed_kernel.ops.layernorm.triton import (
@@ -42,16 +39,26 @@ from tokenspeed_kernel.platform import current_platform
 _platform = current_platform()
 
 if _platform.is_npu:
+    from tokenspeed_kernel.ops.layernorm.ascend import add_rmsnorm
+    from tokenspeed_kernel.ops.layernorm.ascend import gemma_rmsnorm as _gemma_rmsnorm
     from tokenspeed_kernel.ops.layernorm.ascend import qk_rmsnorm as _qk_rmsnorm
     from tokenspeed_kernel.ops.layernorm.ascend import rmsnorm as _rmsnorm
 elif _platform.is_amd:
+    from tokenspeed_kernel.ops.layernorm.triton import add_rmsnorm
     from tokenspeed_kernel.ops.layernorm.triton import qk_rmsnorm as _qk_rmsnorm
     from tokenspeed_kernel.ops.layernorm.triton import rmsnorm as triton_rmsnorm
 else:
     from tokenspeed_kernel.ops.layernorm.flashinfer import (
         fused_add_rmsnorm as _fused_add_rmsnorm,
     )
+    from tokenspeed_kernel.ops.layernorm.flashinfer import (
+        gemma_fused_add_rmsnorm as _gemma_fused_add_rmsnorm,
+    )
+    from tokenspeed_kernel.ops.layernorm.flashinfer import (
+        gemma_rmsnorm as _gemma_rmsnorm,
+    )
     from tokenspeed_kernel.ops.layernorm.flashinfer import rmsnorm as _rmsnorm
+    from tokenspeed_kernel.ops.layernorm.triton import add_rmsnorm
     from tokenspeed_kernel.ops.layernorm.triton import qk_rmsnorm as _qk_rmsnorm
 
 
@@ -96,6 +103,44 @@ def rmsnorm(
             raise ValueError("rmsnorm does not support residual and out together")
         return _rmsnorm(x, weight, eps, residual=residual)
     return _rmsnorm(x, weight, eps, out=out)
+
+
+def gemma_rmsnorm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    eps: float,
+    residual: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Apply Gemma RMSNorm (FP32 1 + weight), optionally updating a residual.
+
+    Args:
+        x: Activation rows [rows, width]. NVIDIA/Ascend overwrite x when a
+            residual is supplied; AMD retains its out-of-place reference path.
+        weight: Normalization weight [width], before the Gemma offset.
+        eps: RMS denominator epsilon.
+        residual: Optional residual rows added before normalization.
+
+    Returns:
+        Normalized rows, or (normalized rows, updated residual) with residual.
+        NVIDIA/Ascend normalize the unrounded FP32 sum; AMD rounds the sum to
+        the activation dtype first, preserving the existing platform contract.
+    """
+    if _platform.is_npu:
+        return _gemma_rmsnorm(x, weight, eps, residual=residual)
+    if _platform.is_amd:
+        if residual is not None:
+            x = x + residual
+            residual = x
+        values = x.float()
+        variance = values.square().mean(dim=-1, keepdim=True)
+        result = (values * torch.rsqrt(variance + eps) * (1.0 + weight.float())).to(
+            x.dtype
+        )
+        return result if residual is None else (result, residual)
+    if residual is not None:
+        _gemma_fused_add_rmsnorm(x, residual, weight, eps)
+        return x, residual
+    return _gemma_rmsnorm(x, weight, eps)
 
 
 def qk_rmsnorm(
@@ -220,6 +265,7 @@ def gated_residual_combine_norm(
 __all__ = [
     "add_rmsnorm",
     "gated_residual_combine_norm",
+    "gemma_rmsnorm",
     "grouped_gemma_rmsnorm",
     "grouped_rmsnorm",
     "nvfp4_copy_supported",

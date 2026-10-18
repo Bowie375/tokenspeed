@@ -104,6 +104,7 @@ from tokenspeed.runtime.utils import (
     make_layers,
     set_weight_attrs,
 )
+from tokenspeed.runtime.utils.device_stream import new_device_stream
 from tokenspeed.runtime.utils.env import envs
 
 logger = logging.getLogger(__name__)
@@ -1035,7 +1036,7 @@ class Qwen3_5ForCausalLM(nn.Module):
         self.mapping = mapping
         self.hidden_size = config.hidden_size
 
-        alt_stream = torch.cuda.Stream()
+        alt_stream = new_device_stream()
 
         # Embedding layer
         self.embed_tokens = VocabParallelEmbedding(

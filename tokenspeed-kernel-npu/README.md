@@ -42,6 +42,27 @@ For the complete Qwen3-0.6B launch command, ACL Graph capture sizes, serving
 limits, and a request example, see the
 [Ascend model recipe](../docs/recipes/models.md#qwen3-06b-on-ascend-npu).
 
+## Gemma normalization
+
+The shared `tokenspeed_kernel.ops.layernorm` API dispatches standalone Gemma
+RMSNorm and fused residual-add RMSNorm to Ascend Triton kernels. Gemma scaling
+uses `1 + weight` in FP32. The fused operation normalizes the unrounded FP32
+residual sum and stores the updated residual in its original dtype; its output
+may overwrite the input. An optional second addend is summed with the input
+in the activation dtype before the residual is added. BF16, FP16 and FP32 rows
+with dense columns are supported, including strided rows and empty batches.
+FP8/NVFP4 output copies are unsupported and explicitly rejected.
+
+Run the numerical and runtime integration tests on one visible NPU:
+
+```bash
+python -m pytest -q tokenspeed-kernel-npu/test/test_layernorm.py \
+    test/runtime/models/test_gemma_rmsnorm_npu.py
+```
+
+These tests cover normalization only; they do not establish complete Qwen3.5
+prefill/decode support.
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install
