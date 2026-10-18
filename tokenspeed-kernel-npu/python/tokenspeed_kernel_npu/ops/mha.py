@@ -340,7 +340,85 @@ def mha_decode_with_kvcache(
     return output.reshape_as(q)
 
 
+def mha_encoder_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens: torch.Tensor,
+    cu_seqlens_cpu: list[int] | None,
+    softmax_scale: float | None,
+    max_seqlen: int,
+) -> torch.Tensor:
+    """Run full bidirectional packed vision attention without dropout or KV writes.
+
+    Args:
+        q: FP16/BF16 [tokens,heads,width] query rows on Ascend.
+        k: Keys with q's shape/dtype/device; arbitrary strides are accepted.
+        v: Values with q's shape/dtype/device; arbitrary strides are accepted.
+        cu_seqlens: Contiguous device int32/int64 [sequences+1] token boundaries.
+        cu_seqlens_cpu: Optional matching host boundaries. Supplying this mirror
+            avoids device-to-host synchronization; omission is an eager fallback.
+        softmax_scale: Explicit score multiplier, or None for width**-0.5.
+        max_seqlen: Maximum sequence length; bounds must fit this capacity.
+
+    Returns:
+        [tokens,heads,width] output in q's dtype. Each sequence sees all its own
+        tokens and no other sequence. Inputs are unchanged; empty input launches
+        no native attention. This operation does not implement backward/capture.
+    """
+    if q.ndim != 3 or q.shape[1] <= 0 or q.shape[2] <= 0:
+        raise ValueError(
+            "encoder attention requires positive [tokens,heads,width] geometry"
+        )
+    if q.device.type != "npu" or q.dtype not in (torch.bfloat16, torch.float16):
+        raise ValueError("encoder attention requires FP16/BF16 Ascend input")
+    if any(
+        t.shape != q.shape or t.device != q.device or t.dtype != q.dtype for t in (k, v)
+    ):
+        raise ValueError("encoder Q/K/V must have identical shape, dtype and device")
+    if (
+        cu_seqlens.ndim != 1
+        or cu_seqlens.numel() < 1
+        or not cu_seqlens.is_contiguous()
+        or cu_seqlens.device != q.device
+        or cu_seqlens.dtype not in (torch.int32, torch.int64)
+    ):
+        raise ValueError(
+            "encoder boundaries must be a contiguous device integer vector"
+        )
+    bounds = cu_seqlens.cpu().tolist() if cu_seqlens_cpu is None else cu_seqlens_cpu
+    if (
+        len(bounds) != cu_seqlens.numel()
+        or bounds[0] != 0
+        or bounds[-1] != q.shape[0]
+        or max_seqlen < 0
+        or any(
+            end < start or end - start > max_seqlen
+            for start, end in zip(bounds, bounds[1:])
+        )
+    ):
+        raise ValueError("encoder boundaries must cover tokens and fit max_seqlen")
+    if q.shape[0] == 0:
+        return torch.empty_like(q)
+    return torch_npu.npu_fusion_attention(
+        q.contiguous(),
+        k.contiguous(),
+        v.contiguous(),
+        q.shape[1],
+        "TND",
+        scale=_scale(q, softmax_scale),
+        keep_prob=1.0,
+        pre_tockens=2147483647,
+        next_tockens=2147483647,
+        actual_seq_qlen=bounds[1:],
+        actual_seq_kvlen=bounds[1:],
+        sparse_mode=0,
+    )[0]
+
+
 __all__ = [
+    "mha_encoder_attention",
     "mha_decode_with_kvcache",
     "mha_extend_with_kvcache",
     "mha_prefill",

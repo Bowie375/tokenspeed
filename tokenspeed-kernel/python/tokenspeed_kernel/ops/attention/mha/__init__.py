@@ -149,6 +149,48 @@ def mha_plan(
     return {"extend_mode": extend_mode}
 
 
+def mha_encoder_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens: torch.Tensor,
+    cu_seqlens_cpu: list[int] | None,
+    softmax_scale: float | None,
+    max_seqlen: int,
+) -> torch.Tensor:
+    """Run noncausal cache-less encoder attention through shared dispatch.
+
+    Args:
+        q: Packed [tokens,heads,width] query rows.
+        k: Matching key rows.
+        v: Matching value rows.
+        cu_seqlens: Device integer packed sequence boundaries.
+        cu_seqlens_cpu: Optional matching host mirror for native APIs.
+        softmax_scale: Score scale, or None for width**-0.5.
+        max_seqlen: Maximum tokens in one sequence.
+
+    Returns:
+        Packed output in q's dtype, with full within-sequence visibility and
+        no KV cache update. Unsupported platforms fail kernel selection.
+    """
+    kernel = select_kernel(
+        "attention",
+        "mha_encoder_attention",
+        _attention_format_signature(q=q, k=k, v=v),
+        traits={"head_dim": q.shape[-1]},
+    )
+    return kernel(
+        q=q,
+        k=k,
+        v=v,
+        cu_seqlens=cu_seqlens,
+        cu_seqlens_cpu=cu_seqlens_cpu,
+        softmax_scale=softmax_scale,
+        max_seqlen=max_seqlen,
+    )
+
+
 def mha_prefill(
     # attention inputs
     q: torch.Tensor,
@@ -538,6 +580,7 @@ import tokenspeed_kernel.ops.attention.mha.gluon  # noqa: E402,F401
 # isort: on
 
 __all__ = [
+    "mha_encoder_attention",
     "mha_plan",
     "mha_prefill",
     "mha_extend_with_kvcache",

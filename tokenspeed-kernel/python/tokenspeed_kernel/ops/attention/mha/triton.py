@@ -209,6 +209,9 @@ if current_platform().is_npu:
         mha_decode_with_kvcache as _mha_decode_with_kvcache,
     )
     from tokenspeed_kernel_npu.ops.mha import (
+        mha_encoder_attention as _mha_encoder_attention,
+    )
+    from tokenspeed_kernel_npu.ops.mha import (
         mha_extend_with_kvcache as _mha_extend_with_kvcache,
     )
     from tokenspeed_kernel_npu.ops.mha import mha_prefill as _mha_prefill
@@ -272,3 +275,30 @@ if current_platform().is_npu:
     )
     def torch_npu_mha_decode_with_kvcache(**kwargs):
         return _mha_decode_with_kvcache(**kwargs)
+
+
+if current_platform().is_npu:
+
+    @register_kernel(
+        "attention",
+        "mha_encoder_attention",
+        name="torch_npu_mha_encoder_attention",
+        solution="torch_npu",
+        capability=_NPU_CAPABILITY,
+        signatures=format_signatures(
+            ("q", "k", "v"), "dense", {torch.bfloat16, torch.float16}
+        ),
+        priority=Priority.PERFORMANT,
+    )
+    def torch_npu_mha_encoder_attention(
+        q, k, v, *, cu_seqlens, cu_seqlens_cpu, softmax_scale, max_seqlen
+    ):
+        return _mha_encoder_attention(
+            q,
+            k,
+            v,
+            cu_seqlens=cu_seqlens,
+            cu_seqlens_cpu=cu_seqlens_cpu,
+            softmax_scale=softmax_scale,
+            max_seqlen=max_seqlen,
+        )

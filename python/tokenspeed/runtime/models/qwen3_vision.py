@@ -196,6 +196,7 @@ class Qwen3VLVisionBlock(nn.Module):
         rotary_pos_emb_sin: torch.Tensor,
         max_seqlen: int | None = None,
         sequence_lengths: torch.Tensor | None = None,
+        cu_seqlens_cpu: list[int] | None = None,
     ) -> torch.Tensor:
         hidden_states = self.norm1(x)
         hidden_states = rearrange(hidden_states, "s b ... -> b s ...")
@@ -206,6 +207,7 @@ class Qwen3VLVisionBlock(nn.Module):
             rotary_pos_emb_sin=rotary_pos_emb_sin,
             max_seqlen=max_seqlen,
             sequence_lengths=sequence_lengths,
+            cu_seqlens_cpu=cu_seqlens_cpu,
         )
         attn = rearrange(attn, "b s ... -> s b ...")
         x += attn
@@ -669,6 +671,7 @@ class Qwen3VLMoeVisionModel(nn.Module):
 
         return {
             "cu_seqlens": cu_seqlens,
+            "cu_seqlens_cpu": token_cu_seqlens.tolist(),
             "rotary_pos_emb_cos": rotary_pos_emb_cos,
             "rotary_pos_emb_sin": rotary_pos_emb_sin,
             "max_seqlen": max_seqlen,
@@ -698,6 +701,7 @@ class Qwen3VLMoeVisionModel(nn.Module):
                 rotary_pos_emb_sin=rotary_pos_emb_sin,
                 max_seqlen=max_seqlen,
                 sequence_lengths=sequence_lengths,
+                cu_seqlens_cpu=metadata["cu_seqlens_cpu"],
             )
             if layer_num in self.deepstack_visual_indexes:
                 deepstack_feature = self.deepstack_merger_list[num_deepstack_captured](

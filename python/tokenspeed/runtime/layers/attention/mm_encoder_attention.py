@@ -40,6 +40,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from einops import rearrange
+from tokenspeed_kernel.ops.attention.mha import mha_encoder_attention
 from tokenspeed_kernel.platform import current_platform
 
 from tokenspeed.runtime.distributed import utils as dist_utils
@@ -124,6 +125,54 @@ def _varlen_metadata(
     if max_seqlen is None:
         max_seqlen = int(seq_lens.max().item())
     return cu_seqlens, seq_lens, int(max_seqlen)
+
+
+def vision_attn_ascend(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens: torch.Tensor | None,
+    bsz: int,
+    seq_len: int,
+    softmax_scale: float | None = None,
+    max_seqlen: int | None = None,
+    sequence_lengths: torch.Tensor | None = None,
+    workspace_buffer: torch.Tensor | None = None,
+    cu_seqlens_cpu: list[int] | None = None,
+) -> torch.Tensor:
+    """Ascend full-visibility encoder attention; external cuDNN metadata is rejected."""
+    if sequence_lengths is not None or workspace_buffer is not None:
+        raise ValueError(
+            "Ascend encoder attention does not accept cuDNN sequence/workspace metadata"
+        )
+    original_shape = q.shape
+    if q.ndim not in (3, 4) or k.shape != q.shape or v.shape != q.shape:
+        raise ValueError("encoder Q/K/V must be matching packed 3D or batched 4D rows")
+    q, k, v = [t.reshape(-1, t.shape[-2], t.shape[-1]) for t in (q, k, v)]
+    if cu_seqlens is None:
+        if bsz < 0 or seq_len < 0 or bsz * seq_len != q.shape[0]:
+            raise ValueError("uniform encoder batch dimensions must match token count")
+        if cu_seqlens_cpu is None:
+            cu_seqlens_cpu = [row * seq_len for row in range(bsz + 1)]
+        cu_seqlens = torch.tensor(cu_seqlens_cpu, dtype=torch.int32, device=q.device)
+    if max_seqlen is None:
+        if cu_seqlens_cpu is None:
+            cu_seqlens_cpu = cu_seqlens.cpu().tolist()
+        max_seqlen = max(
+            (end - start for start, end in zip(cu_seqlens_cpu, cu_seqlens_cpu[1:])),
+            default=0,
+        )
+    result = mha_encoder_attention(
+        q,
+        k,
+        v,
+        cu_seqlens=cu_seqlens,
+        cu_seqlens_cpu=cu_seqlens_cpu,
+        softmax_scale=softmax_scale,
+        max_seqlen=max_seqlen,
+    )
+    return result.reshape(original_shape)
 
 
 def vision_attn_triton(
@@ -292,6 +341,7 @@ def vision_attn_flashinfer_cudnn(
 
 
 _BACKENDS: dict[str, Callable[..., torch.Tensor]] = {
+    "ascend": vision_attn_ascend,
     "triton_attn": vision_attn_triton,
     "fa3": vision_attn_fa3,
     "fa4": vision_attn_fa4,
@@ -307,6 +357,8 @@ def _default_multimodal_encoder_attn_backend() -> str:
         if _platform.arch_version.major == 10:  # Blackwell SM100
             return "fa4"
         return "triton_attn"
+    if _platform.is_npu:
+        return "ascend"
     if _is_amd:
         return "triton_attn"
     raise RuntimeError(
@@ -331,6 +383,10 @@ def _resolve_backend(name: str | None) -> Callable[..., torch.Tensor]:
         raise ValueError(
             f"Unknown multimodal encoder attention backend {name!r} "
             f"(check --mm-attention-backend); available: {sorted(_BACKENDS)}"
+        )
+    if name == "ascend" and not _platform.is_npu:
+        raise ValueError(
+            "the 'ascend' encoder attention backend requires an Ascend NPU"
         )
     if name in ("fa3", "fa4", "flashinfer_cudnn") and not _is_nvidia:
         raise ValueError(
@@ -560,6 +616,11 @@ class MultimodalEncoderAttention(nn.Module):
             max_seqlen=max_seqlen,
             sequence_lengths=sequence_lengths,
             workspace_buffer=self._workspace_buffer,
+            **(
+                {"cu_seqlens_cpu": kwargs["cu_seqlens_cpu"]}
+                if "cu_seqlens_cpu" in kwargs
+                else {}
+            ),
         )
 
         output = rearrange(output, "(b s) ... h d -> b s ... (h d)", b=bsz)
