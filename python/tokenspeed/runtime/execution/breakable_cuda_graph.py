@@ -476,7 +476,9 @@ def break_point(method: Callable | None = None) -> Callable:
 # -- padded-input helpers (the two strategies of the prefill padding contract) --
 
 
-def scrub_padding_tail(num_real_tokens: int, *tensors: torch.Tensor | None) -> None:
+def scrub_padding_tail(
+    num_real_tokens: int | None, *tensors: torch.Tensor | None
+) -> None:
     """Zero the padded tail rows ``[num_real_tokens:]`` of token-shaped tensors in place.
 
     Under a padded-bucket replay, an eager break receives ``bucket`` rows whose
@@ -486,8 +488,12 @@ def scrub_padding_tail(num_real_tokens: int, *tensors: torch.Tensor | None) -> N
     scan writeback, FP8 quantize) would otherwise touch the garbage rows. Pass
     the real token count from the live metadata's CPU mirror (sync-free on the
     launch thread); a no-op on unpadded forwards, and ``None`` tensors are
-    skipped.
+    skipped. An unspecified extent (None) leaves tensors unchanged.
     """
+    if num_real_tokens is None:
+        return
+    if num_real_tokens < 0:
+        raise ValueError("real token count must be nonnegative")
     for t in tensors:
         if t is not None and num_real_tokens < t.shape[0]:
             t[num_real_tokens:].zero_()

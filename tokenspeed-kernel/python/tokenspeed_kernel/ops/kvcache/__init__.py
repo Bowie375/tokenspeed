@@ -64,3 +64,26 @@ def zero_byte_ranges(
         )
 
         zero_device_byte_ranges(backing, ranges)
+
+
+def store_state_rows(
+    states: torch.Tensor, slab: torch.Tensor, blocks: torch.Tensor
+) -> None:
+    """Scatter per-request recurrent state to strided cache rows in place.
+
+    Args:
+        states: Floating [requests,heads,A,B] scan results, possibly strided.
+        slab: Floating [blocks,heads,A,B] cache with matching state dimensions.
+        blocks: Integer [requests] destinations; negatives skip stores.
+            Writable destinations must be unique and in bounds.
+
+    Returns:
+        None; values cast to the slab dtype and other blocks stay unchanged.
+    """
+    if states.device.type == "npu":
+        from tokenspeed_kernel_npu.ops.state import store_state_rows as implementation
+    else:
+        from tokenspeed_kernel.ops.kvcache.triton import (
+            store_state_rows as implementation,
+        )
+    implementation(states, slab, blocks)

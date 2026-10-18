@@ -77,6 +77,57 @@ Tests compare preparation against CPU references and connect packing,
 convolution, splitting and recurrence, checking prefill against repeated
 decode with matching convolution and recurrent state.
 
+## Ascend state preparation and metadata
+
+`prepare_prefill_state_inputs` stages convolution history and gathers recurrent
+inputs through the shared GDN API. Its Ascend implementation is fused in
+`tokenspeed_kernel_npu.ops.state`. Cache tensors can have arbitrary strides.
+Positive input ids resume history; nonpositive inputs materialize zero
+recurrent state without reading the null block. Fresh convolution windows
+remain unchanged and are interpreted as logical zeros by the convolution's
+history flags. Nonpositive destinations are padding: they access no cache,
+return zero recurrent state and have a false history flag. This avoids Python
+negative indexing into the last cache block.
+
+Resumed convolution history is copied only when input and destination differ.
+Shared checkpoints are read-only; writable destinations must be unique and
+cannot overlap another request's input. The existing two-slot resolver keeps
+fresh reads at id 0, chooses a positive checkpoint before a live block, and
+always writes the live slot. Padding remains visible in the output ids as -1.
+Its optional host-synchronizing debug validation checks cross-request input
+aliasing as well as missing and duplicate live blocks. Ordinary execution
+validates tensor shapes, devices and integer types without reading values.
+
+`tokenspeed_kernel.ops.kvcache.store_state_rows` dispatches recurrent writeback
+to a fused masked Ascend scatter. It preserves strides, casts to the cache
+dtype and skips negative destinations, including NaN dummy scan results.
+The generic scatter permits destination 0; the state-table contract prevents
+live requests from writing the null block. Index bounds and destination
+ownership remain caller contracts.
+
+`build_causal_conv1d_prefill_metadata` is exposed through the shared GDN API.
+The host length mirror sizes exact maps and retains host int64 boundaries;
+a portable Triton kernel builds the Ascend request/chunk arrays from device
+boundaries in one launch, with no per-request host assignments. CPU and GPU
+entry points retain their previous implementations. Empty sequences emit no
+programs. The maps belong to one forward and are reused across layers.
+
+The existing runtime `scrub_padding_tail` keeps live token rows and overwrites
+padded rows with zero, including NaNs and strided views. An unspecified live
+extent is a no-op; a negative extent is rejected. It uses the host metadata
+mirror and adds no device-to-host synchronization.
+
+```bash
+python -m pytest -q tokenspeed-kernel-npu/test/test_gdn_state_helpers.py
+```
+
+Tests cover fresh/resumed/padded gathers, shared checkpoint readers, strided
+cache views, masked writeback, casts, exact ragged maps and compilation reuse.
+A chunked-prefill integration test resolves blocks, gathers state, constructs
+convolution metadata, runs convolution and recurrence, then writes back to a
+new live block while preserving the old checkpoint. This uses the existing
+cache lifecycle and introduces no backend-private request state.
+
 ## FlashInfer PDL adapters
 
 The FlashInfer adapter retains the upstream launch geometry and runtime ABI,

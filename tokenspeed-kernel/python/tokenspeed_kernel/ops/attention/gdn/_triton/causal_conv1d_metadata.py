@@ -173,6 +173,33 @@ def build_causal_conv1d_prefill_metadata(
         Empty requests produce no programs. CUDA/HIP uses one Triton launch
         with no index-table initialization or H2D; CPU provides a reference.
     """
+    metadata, counts = _allocate_prefill_metadata(
+        query_start_loc, seq_lens_cpu, block_m
+    )
+    num_programs = metadata.batch_indices.numel()
+    if num_programs == 0:
+        return metadata
+    if query_start_loc.is_cuda:
+        _build_causal_conv1d_metadata_kernel[(len(counts),)](
+            query_start_loc,
+            metadata.batch_indices,
+            metadata.chunk_offsets,
+            BLOCK_M=block_m,
+            REQUEST_BLOCK=128,
+            STORE_BLOCK=256,
+        )
+    else:
+        cursor = 0
+        for request, count in enumerate(counts):
+            metadata.batch_indices[cursor : cursor + count] = request
+            metadata.chunk_offsets[cursor : cursor + count] = torch.arange(
+                count, dtype=torch.int32
+            )
+            cursor += count
+    return metadata
+
+
+def _allocate_prefill_metadata(query_start_loc, seq_lens_cpu, block_m):
     if block_m <= 0:
         raise ValueError("convolution block_m must be positive")
     if (
@@ -207,23 +234,4 @@ def build_causal_conv1d_prefill_metadata(
         block_m=block_m,
         cu_seqlens_cpu=cu_seqlens_cpu,
     )
-    if num_programs == 0:
-        return metadata
-    if query_start_loc.is_cuda:
-        _build_causal_conv1d_metadata_kernel[(len(lengths),)](
-            query_start_loc,
-            metadata.batch_indices,
-            metadata.chunk_offsets,
-            BLOCK_M=block_m,
-            REQUEST_BLOCK=128,
-            STORE_BLOCK=256,
-        )
-    else:
-        cursor = 0
-        for request, count in enumerate(counts):
-            metadata.batch_indices[cursor : cursor + count] = request
-            metadata.chunk_offsets[cursor : cursor + count] = torch.arange(
-                count, dtype=torch.int32
-            )
-            cursor += count
-    return metadata
+    return metadata, counts

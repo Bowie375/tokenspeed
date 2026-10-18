@@ -25,6 +25,10 @@ from dataclasses import dataclass
 from enum import Enum
 
 import torch
+from tokenspeed_kernel.ops.attention.gdn._triton.causal_conv1d_metadata import (
+    CAUSAL_CONV1D_BLOCK_M,
+    CausalConv1dPrefillMetadata,
+)
 from tokenspeed_kernel.platform import current_platform
 from tokenspeed_kernel.profiling import ShapeCapture, kernel_scope
 from tokenspeed_kernel.selection import NoKernelFoundError, select_kernel
@@ -932,6 +936,72 @@ def fused_qkv_split_gdn_prefill(
     )
 
 
+def prepare_prefill_state_inputs(
+    conv_states, ssm_states, state_in_blocks, state_out_blocks
+):
+    """Gather recurrent inputs and stage resumed convolution state.
+
+    Args:
+        conv_states: Strided [blocks,channels,window] convolution cache.
+        ssm_states: Strided [blocks,heads,A,B] recurrent cache.
+        state_in_blocks: Integer [requests] source ids; <=0 means fresh.
+        state_out_blocks: Integer [requests] private working blocks.
+            Ascend skips nonpositive destinations as padding.
+
+    Returns:
+        Dense recurrent inputs and history flags. Only resumed live conv
+        windows are copied; input checkpoints and recurrent cache stay unchanged.
+    """
+    if conv_states.device.type == "npu":
+        from tokenspeed_kernel_npu.ops.state import (
+            prepare_prefill_state_inputs as implementation,
+        )
+    else:
+        from tokenspeed_kernel.ops.attention.gdn._triton.prefill_state_inputs import (
+            prepare_prefill_state_inputs as implementation,
+        )
+    return implementation(conv_states, ssm_states, state_in_blocks, state_out_blocks)
+
+
+def build_causal_conv1d_prefill_metadata(query_start_loc, seq_lens_cpu, block_m):
+    """Build read-only per-forward convolution maps shared by all layers.
+
+    Args:
+        query_start_loc: Contiguous device integer [requests+1] boundaries.
+        seq_lens_cpu: CPU integer lengths matching device boundary differences.
+            Used only to allocate maps and the host int64 boundary mirror.
+        block_m: Positive fixed token count per convolution program.
+
+    Returns:
+        CausalConv1dPrefillMetadata with exact device request/chunk maps.
+        Ascend fills them in one device launch without per-request CPU uploads.
+        Empty requests emit no programs. Boundary values are caller contracts.
+    """
+    from tokenspeed_kernel.ops.attention.gdn._triton.causal_conv1d_metadata import (
+        _allocate_prefill_metadata,
+        _build_causal_conv1d_metadata_kernel,
+    )
+    from tokenspeed_kernel.ops.attention.gdn._triton.causal_conv1d_metadata import (
+        build_causal_conv1d_prefill_metadata as legacy_builder,
+    )
+
+    if query_start_loc.device.type != "npu":
+        return legacy_builder(query_start_loc, seq_lens_cpu, block_m)
+    metadata, counts = _allocate_prefill_metadata(
+        query_start_loc, seq_lens_cpu, block_m
+    )
+    if metadata.batch_indices.numel():
+        _build_causal_conv1d_metadata_kernel[(len(counts),)](
+            query_start_loc,
+            metadata.batch_indices,
+            metadata.chunk_offsets,
+            BLOCK_M=block_m,
+            REQUEST_BLOCK=128,
+            STORE_BLOCK=256,
+        )
+    return metadata
+
+
 # Backend registration (side-effect imports)
 # isort: off
 import tokenspeed_kernel.ops.attention.gdn.ascend  # noqa: E402,F401
@@ -942,6 +1012,10 @@ import tokenspeed_kernel.ops.attention.gdn.triton  # noqa: E402,F401
 # isort: on
 
 __all__ = [
+    "prepare_prefill_state_inputs",
+    "CAUSAL_CONV1D_BLOCK_M",
+    "CausalConv1dPrefillMetadata",
+    "build_causal_conv1d_prefill_metadata",
     "GDN_TREE_VERIFY_CHUNKED_MIN_NODES",
     "GDN_TREE_VERIFY_CHUNKED_MAX_NODES",
     "GdnCheckpointLayout",

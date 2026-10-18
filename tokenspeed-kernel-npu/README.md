@@ -83,6 +83,12 @@ shared activation API. It updates attention output in place, supports packed
 strided gate views and optional head bias, and uses FP32 arithmetic. See the
 [sigmoid gate contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/activation/README.md#full-attention-output-sigmoid-gate).
 
+State prefill preparation and recurrent writeback use fused masked Ascend
+kernels through shared GDN/cache APIs. Exact convolution schedules are built
+on device and reused across layers. See the
+[state preparation and metadata contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-state-preparation-and-metadata)
+for null blocks, padding, checkpoint ownership and tests.
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install

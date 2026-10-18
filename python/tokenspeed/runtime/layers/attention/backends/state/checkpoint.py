@@ -74,6 +74,18 @@ def compute_state_block_indices(
         ``(state_in, state_out)`` int32 block ids per request; ``state_in``
         is ``0`` for a request without history.
     """
+    integer_dtypes = (torch.int32, torch.int64)
+    if rows.ndim != 2 or rows.dtype not in integer_dtypes:
+        raise ValueError("state block rows must be a 2D integer table")
+    if (
+        seq_lens_before.ndim != 1
+        or seq_lens_before.dtype not in integer_dtypes
+        or seq_lens_before.device != rows.device
+        or rows.shape[0] < seq_lens_before.numel()
+    ):
+        raise ValueError(
+            "state lengths must be an integer vector matching the table device and rows"
+        )
     bs = seq_lens_before.shape[0]
     rows = rows[:bs]
     if rows.shape[1] < STATE_TABLE_SLOTS:
@@ -118,4 +130,13 @@ def compute_state_block_indices(
                 "table): two requests writing one working state page would "
                 "silently clobber each other"
             )
+        input_ids, output_ids = state_in.cpu().tolist(), state_out.cpu().tolist()
+        for row, destination in enumerate(output_ids):
+            if any(
+                source > 0 and source == destination and reader != row
+                for reader, source in enumerate(input_ids)
+            ):
+                raise ValueError(
+                    f"state paging: live block overwrites another request's input checkpoint ({group_id!r} table)"
+                )
     return state_in.to(torch.int32), state_out.to(torch.int32)
