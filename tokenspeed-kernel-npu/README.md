@@ -73,6 +73,11 @@ GDN projection packing, decay preparation and post-convolution QKV splitting.
 See the [convolution contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/conv/README.md)
 and [GDN preparation contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-preparation).
 
+GDN output gated RMSNorm also uses a fused Ascend implementation through the
+shared layernorm API. It supports independent head statistics, shared head
+weights, SiLU/sigmoid gates and strided projection views. See the
+[gated RMSNorm contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/layernorm/README.md#gated-grouped-rmsnorm-on-ascend).
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install

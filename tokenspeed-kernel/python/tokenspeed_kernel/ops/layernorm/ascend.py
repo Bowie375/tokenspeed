@@ -21,11 +21,17 @@
 """Ascend layernorm kernels."""
 
 import torch
-from tokenspeed_kernel_npu.ops.layernorm import add_rmsnorm, gemma_rmsnorm
+from tokenspeed_kernel_npu.ops.layernorm import (
+    add_rmsnorm,
+    gated_rmsnorm,
+    gemma_rmsnorm,
+)
 from tokenspeed_kernel_npu.ops.layernorm import qk_rmsnorm as _npu_qk_rmsnorm
-from tokenspeed_kernel_npu.ops.layernorm import rmsnorm
+from tokenspeed_kernel_npu.ops.layernorm import (
+    rmsnorm,
+)
 
-__all__ = ["add_rmsnorm", "gemma_rmsnorm", "qk_rmsnorm", "rmsnorm"]
+__all__ = ["gated_rmsnorm", "add_rmsnorm", "gemma_rmsnorm", "qk_rmsnorm", "rmsnorm"]
 
 
 def qk_rmsnorm(

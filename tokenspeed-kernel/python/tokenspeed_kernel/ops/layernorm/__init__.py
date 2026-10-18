@@ -23,6 +23,12 @@
 from __future__ import annotations
 
 import torch
+from tokenspeed_kernel.ops.layernorm._triton.gated import (
+    ROWS_PER_PROGRAM as GATED_RMSNORM_ROWS_PER_PROGRAM,
+)
+from tokenspeed_kernel.ops.layernorm._triton.gated import (
+    rmsnorm_fn as _gpu_gated_rmsnorm,
+)
 from tokenspeed_kernel.ops.layernorm.triton import (
     gated_residual_combine_norm as _gated_residual_combine_norm,
 )
@@ -39,7 +45,12 @@ from tokenspeed_kernel.platform import current_platform
 _platform = current_platform()
 
 if _platform.is_npu:
-    from tokenspeed_kernel.ops.layernorm.ascend import add_rmsnorm
+    from tokenspeed_kernel.ops.layernorm.ascend import (
+        add_rmsnorm,
+    )
+    from tokenspeed_kernel.ops.layernorm.ascend import (
+        gated_rmsnorm as _npu_gated_rmsnorm,
+    )
     from tokenspeed_kernel.ops.layernorm.ascend import gemma_rmsnorm as _gemma_rmsnorm
     from tokenspeed_kernel.ops.layernorm.ascend import qk_rmsnorm as _qk_rmsnorm
     from tokenspeed_kernel.ops.layernorm.ascend import rmsnorm as _rmsnorm
@@ -60,6 +71,52 @@ else:
     from tokenspeed_kernel.ops.layernorm.flashinfer import rmsnorm as _rmsnorm
     from tokenspeed_kernel.ops.layernorm.triton import add_rmsnorm
     from tokenspeed_kernel.ops.layernorm.triton import qk_rmsnorm as _qk_rmsnorm
+
+
+def gated_rmsnorm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    *,
+    z: torch.Tensor | None,
+    eps: float,
+    group_size: int | None,
+    norm_before_gate: bool,
+    sigmoid_gate: bool,
+    weights_independent: bool,
+    fp8_scale: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Apply grouped RMSNorm with optional SiLU or sigmoid gating.
+
+    Args:
+        x: Floating-point input shaped [...,width].
+        weight: [width] scales or [group_size] scales shared across groups.
+        z: Optional gate input matching x's shape; row/column strides are valid.
+        eps: Epsilon added to each group's FP32 mean square.
+        group_size: Features per independent RMS statistic; None uses width.
+        norm_before_gate: True computes norm(x)*gate(z); False gates x first.
+        sigmoid_gate: True selects sigmoid; False selects SiLU.
+        weights_independent: GPU PDL promise that weights precede the producer.
+            Ascend uses ordinary stream ordering for either value.
+        fp8_scale: Optional static FP8 output scale; unsupported on Ascend.
+
+    Returns:
+        A new tensor shaped like x. Statistics, weights and gates compute in
+        FP32, then round to x's dtype, or static FP8 when requested on GPU.
+        Inputs are unchanged. This operation uses weight directly, without
+        the Gemma 1+weight offset.
+    """
+    implementation = _npu_gated_rmsnorm if _platform.is_npu else _gpu_gated_rmsnorm
+    return implementation(
+        x,
+        weight,
+        z=z,
+        eps=eps,
+        group_size=group_size,
+        norm_before_gate=norm_before_gate,
+        sigmoid_gate=sigmoid_gate,
+        weights_independent=weights_independent,
+        fp8_scale=fp8_scale,
+    )
 
 
 def rmsnorm(
@@ -263,6 +320,8 @@ def gated_residual_combine_norm(
 
 
 __all__ = [
+    "GATED_RMSNORM_ROWS_PER_PROGRAM",
+    "gated_rmsnorm",
     "add_rmsnorm",
     "gated_residual_combine_norm",
     "gemma_rmsnorm",

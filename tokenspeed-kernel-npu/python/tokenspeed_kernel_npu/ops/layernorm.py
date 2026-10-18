@@ -257,4 +257,134 @@ def qk_rmsnorm(
     return q_out, k_out
 
 
-__all__ = ["add_rmsnorm", "gemma_rmsnorm", "qk_rmsnorm", "rmsnorm"]
+@triton.jit(do_not_specialize=["xr", "xc", "yr", "zr", "zc", "ws", "eps"])
+def _gated_rmsnorm_kernel(
+    X,
+    Weight,
+    Z,
+    Out,
+    xr,
+    xc,
+    yr,
+    zr,
+    zc,
+    ws,
+    eps,
+    GROUP: tl.constexpr,
+    BLOCK: tl.constexpr,
+    HAS_Z: tl.constexpr,
+    NORM_BEFORE_GATE: tl.constexpr,
+    SIGMOID_GATE: tl.constexpr,
+    SHARED_WEIGHT: tl.constexpr,
+):
+    row = tl.program_id(0).to(tl.int64)
+    group = tl.program_id(1).to(tl.int64)
+    column = tl.arange(0, BLOCK)
+    feature = group * GROUP + column
+    mask = column < GROUP
+    values = tl.load(X + row * xr + feature * xc, mask=mask, other=0).to(tl.float32)
+    if HAS_Z:
+        gate_input = tl.load(Z + row * zr + feature * zc, mask=mask, other=0).to(
+            tl.float32
+        )
+        gate = tl.sigmoid(gate_input)
+        if not SIGMOID_GATE:
+            gate *= gate_input
+        if not NORM_BEFORE_GATE:
+            values *= gate
+    variance = tl.sum(values * values, axis=0) / GROUP
+    weight_column = column if SHARED_WEIGHT else feature
+    weight = tl.load(Weight + weight_column * ws, mask=mask, other=0).to(tl.float32)
+    result = values * tl.rsqrt(variance + eps) * weight
+    if HAS_Z and NORM_BEFORE_GATE:
+        result *= gate
+    tl.store(Out + row * yr + feature, result, mask=mask)
+
+
+def gated_rmsnorm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    *,
+    z: torch.Tensor | None,
+    eps: float,
+    group_size: int | None,
+    norm_before_gate: bool,
+    sigmoid_gate: bool,
+    weights_independent: bool,
+    fp8_scale: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Normalize each last-dimension group with optional fused output gating.
+
+    Args:
+        x: FP16/BF16/FP32 Ascend activations shaped [...,width].
+        weight: Floating-point [width] or shared [group_size] scale vector.
+        z: Optional floating-point gate input shaped like x, on the same device.
+        eps: Epsilon added to each group's FP32 mean square.
+        group_size: Features per independent RMS statistic, or None for width.
+        norm_before_gate: True gates after normalization; False gates before it.
+        sigmoid_gate: True selects sigmoid, False selects SiLU.
+        weights_independent: GPU PDL visibility promise; Ascend orders all reads
+            after preceding stream work for either value.
+        fp8_scale: Unsupported static FP8 output request; must be None.
+
+    Returns:
+        A fresh tensor matching x's shape and dtype. Inputs and scale weights
+        are unchanged. Gates, variance and weight multiplication compute in FP32.
+        Rows and columns may be strided, and empty batches launch no kernel.
+    """
+    if fp8_scale is not None:
+        raise NotImplementedError("Ascend gated RMSNorm does not support FP8 output")
+    if x.ndim < 1 or x.shape[-1] == 0:
+        raise ValueError("gated RMSNorm requires a nonempty feature dimension")
+    dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if x.device.type != "npu" or x.dtype not in dtypes:
+        raise ValueError("gated RMSNorm requires FP16, BF16 or FP32 Ascend input")
+    width = x.shape[-1]
+    size = width if group_size is None else group_size
+    if not isinstance(size, int) or size <= 0 or width % size:
+        raise ValueError(
+            "gated RMSNorm group_size must be positive and divide the width"
+        )
+    if (
+        weight.shape not in ((width,), (size,))
+        or weight.device != x.device
+        or weight.dtype not in dtypes
+    ):
+        raise ValueError(
+            "gated RMSNorm requires a floating [width] or [group_size] weight on the input device"
+        )
+    if z is not None and (
+        z.shape != x.shape or z.device != x.device or z.dtype not in dtypes
+    ):
+        raise ValueError(
+            "gated RMSNorm gate must match the input shape and device with a floating dtype"
+        )
+    rows = x.numel() // width
+    result = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+    if rows == 0:
+        return result
+    inputs = x.reshape(rows, width)
+    gates = None if z is None else z.reshape(rows, width)
+    output = result.reshape(rows, width)
+    _gated_rmsnorm_kernel[(rows, width // size)](
+        inputs,
+        weight,
+        inputs if gates is None else gates,
+        output,
+        *inputs.stride(),
+        output.stride(0),
+        0 if gates is None else gates.stride(0),
+        0 if gates is None else gates.stride(1),
+        weight.stride(0),
+        eps,
+        GROUP=size,
+        BLOCK=triton.next_power_of_2(size),
+        HAS_Z=gates is not None,
+        NORM_BEFORE_GATE=norm_before_gate,
+        SIGMOID_GATE=sigmoid_gate,
+        SHARED_WEIGHT=weight.numel() != width,
+    )
+    return result
+
+
+__all__ = ["add_rmsnorm", "gated_rmsnorm", "gemma_rmsnorm", "qk_rmsnorm", "rmsnorm"]
