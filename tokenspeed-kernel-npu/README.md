@@ -63,6 +63,11 @@ python -m pytest -q tokenspeed-kernel-npu/test/test_layernorm.py \
 These tests cover normalization only; they do not establish complete Qwen3.5
 prefill/decode support.
 
+For Gated DeltaNet prefill and single-token decode, the shared kernel APIs
+also select Ascend recurrence implementations with FP32 recurrent state.
+See the [GDN contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-recurrence).
+These operations alone do not establish complete Qwen3.5 serving support.
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install
