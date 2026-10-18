@@ -121,3 +121,28 @@ if current_platform().is_npu:
             output_state_indices=output_state_indices,
             use_qk_l2norm=use_qk_l2norm,
         )
+
+
+if current_platform().is_npu:
+    from tokenspeed_kernel_npu.ops.gdn_helpers import (
+        ascend_gdn_decay_gate,
+        ascend_pack_gdn_projection,
+        ascend_split_gdn_qkv,
+    )
+
+    for mode, role, function in (
+        ("gdn_decay_gate", "a", ascend_gdn_decay_gate),
+        ("gdn_pack_projection", "mixed_qkv", ascend_pack_gdn_projection),
+        ("gdn_split_qkv", "mixed_qkv", ascend_split_gdn_qkv),
+    ):
+        register_kernel(
+            "attention",
+            mode,
+            name=function.__name__,
+            solution="torch_npu",
+            capability=CapabilityRequirement(vendors=frozenset({"ascend"})),
+            signatures=format_signatures(
+                role, "dense", {torch.float16, torch.bfloat16, torch.float32}
+            ),
+            priority=Priority.PORTABLE,
+        )(function)

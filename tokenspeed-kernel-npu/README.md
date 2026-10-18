@@ -68,6 +68,11 @@ also select Ascend recurrence implementations with FP32 recurrent state.
 See the [GDN contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-recurrence).
 These operations alone do not establish complete Qwen3.5 serving support.
 
+Ascend also provides causal convolution prefill/single-token state update and
+GDN projection packing, decay preparation and post-convolution QKV splitting.
+See the [convolution contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/conv/README.md)
+and [GDN preparation contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-preparation).
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install

@@ -866,6 +866,72 @@ def gdn_replay_commit_supported(
     return True
 
 
+def gdn_decay_gate(
+    A_log: torch.Tensor,
+    a: torch.Tensor,
+    dt_bias: torch.Tensor,
+    *,
+    beta: float,
+    threshold: float,
+) -> torch.Tensor:
+    """Return FP32 [tokens,heads] log decays from [heads] A_log/dt_bias and
+    [tokens,heads] a. beta and threshold select the softplus transform.
+    """
+    kernel = select_kernel(
+        "attention", "gdn_decay_gate", _attention_format_signature(a=a)
+    )
+    return kernel(A_log=A_log, a=a, dt_bias=dt_bias, beta=beta, threshold=threshold)
+
+
+def pack_gdn_projection(mixed_qkv: torch.Tensor, a: torch.Tensor, b: torch.Tensor):
+    """Return independent contiguous copies of [tokens,qkv_width] QKV and
+    [tokens,value_heads] a/b projection views, preserving their dtypes.
+    """
+    kernel = select_kernel(
+        "attention",
+        "gdn_pack_projection",
+        _attention_format_signature(mixed_qkv=mixed_qkv),
+    )
+    return kernel(mixed_qkv=mixed_qkv, a=a, b=b)
+
+
+def fused_qkv_split_gdn_prefill(
+    mixed_qkv: torch.Tensor,
+    num_q_heads: int,
+    num_k_heads: int,
+    num_v_heads: int,
+    head_q: int,
+    head_k: int,
+    head_v: int,
+    *,
+    fuse_l2norm: bool,
+    replay=None,
+    valid_tokens: torch.Tensor | None = None,
+):
+    """Split [tokens,qkv_width] into contiguous Q/K/V [1,tokens,heads,width].
+
+    Head counts and per-head widths define the Q/K/V slices. fuse_l2norm
+    selects per-head Q/K normalization. replay optionally supplies GPU replay
+    storage; unsupported implementations reject it. valid_tokens is an
+    optional device scalar that masks the padded tail to zero.
+    """
+    kernel = select_kernel(
+        "attention", "gdn_split_qkv", _attention_format_signature(mixed_qkv=mixed_qkv)
+    )
+    return kernel(
+        mixed_qkv=mixed_qkv,
+        num_q_heads=num_q_heads,
+        num_k_heads=num_k_heads,
+        num_v_heads=num_v_heads,
+        head_q=head_q,
+        head_k=head_k,
+        head_v=head_v,
+        fuse_l2norm=fuse_l2norm,
+        replay=replay,
+        valid_tokens=valid_tokens,
+    )
+
+
 # Backend registration (side-effect imports)
 # isort: off
 import tokenspeed_kernel.ops.attention.gdn.ascend  # noqa: E402,F401
@@ -884,6 +950,9 @@ __all__ = [
     "gdn_chunk_prefill",
     "gdn_chunk_prefill_capturable",
     "gdn_decode_step",
+    "gdn_decay_gate",
+    "pack_gdn_projection",
+    "fused_qkv_split_gdn_prefill",
     "gdn_decode_mtp",
     "gdn_decode_mtp_supports",
     "gdn_replay_commit",

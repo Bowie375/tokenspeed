@@ -46,6 +46,37 @@ request counts after warmup.
 python -m pytest -q tokenspeed-kernel-npu/test/test_gdn.py
 ```
 
+## Ascend preparation
+
+The shared APIs `pack_gdn_projection`, `gdn_decay_gate` and
+`fused_qkv_split_gdn_prefill` register native Ascend PyTorch implementations in
+`tokenspeed_kernel_npu.ops.gdn_helpers`. They are a correctness baseline;
+packing and splitting allocate independent dense buffers and are not fused
+performance kernels. Runtime callers use these shared APIs rather than GPU
+implementation modules.
+
+Packing copies the possibly strided QKV, decay-logit `a` and update-logit `b`
+views into contiguous tensors, preserving each dtype. Gate preparation returns
+FP32 `-exp(A_log) * softplus(a + dt_bias)` with explicitly supplied softplus
+beta and threshold; stable softplus preserves small decays for negative logits.
+The existing recurrence owns sigmoid transformation of decode update gates;
+prefill receives already transformed gates from its caller.
+
+Post-convolution split returns independent `[1,tokens,heads,width]` Q/K/V
+buffers. Optional Q/K L2 normalization computes in FP32 with epsilon `1e-6`
+before rounding to the input dtype. Callers select normalization explicitly
+and must avoid normalizing twice. An optional device `valid_tokens` scalar
+zeros padded rows, including NaN padding, without a host read. Replay payloads
+are explicitly unsupported on Ascend. BF16, FP16 and FP32 inputs are supported.
+
+```bash
+python -m pytest -q tokenspeed-kernel-npu/test/test_gdn_preparation.py
+```
+
+Tests compare preparation against CPU references and connect packing,
+convolution, splitting and recurrence, checking prefill against repeated
+decode with matching convolution and recurrent state.
+
 ## FlashInfer PDL adapters
 
 The FlashInfer adapter retains the upstream launch geometry and runtime ABI,

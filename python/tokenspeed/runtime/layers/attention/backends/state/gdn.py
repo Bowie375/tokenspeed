@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING
 from tokenspeed_kernel.ops.attention.gdn import (
     gdn_chunk_prefill_capturable,
     gdn_decode_mtp_supports,
+    pack_gdn_projection,
 )
-from tokenspeed_kernel.ops.attention.gdn.triton import pack_gdn_projection
 
 from tokenspeed.runtime.layers.attention.backends.state.mamba import (
     gdn_decode_solution,

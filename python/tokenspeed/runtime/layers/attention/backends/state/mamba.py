@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 from tokenspeed_kernel.ops.attention.gdn import (
+    fused_qkv_split_gdn_prefill,
     gdn_chain_verify_is_chunked,
     gdn_chunk_prefill,
     gdn_decode_mtp,
@@ -42,7 +43,6 @@ from tokenspeed_kernel.ops.attention.gdn.triton import (
     CAUSAL_CONV1D_BLOCK_M,
     CausalConv1dPrefillMetadata,
     build_causal_conv1d_prefill_metadata,
-    fused_qkv_split_gdn_prefill,
 )
 from tokenspeed_kernel.ops.attention.gdn.triton import (
     prepare_prefill_state_inputs as _prepare_cache_prefill_state_inputs,
@@ -1850,6 +1850,7 @@ class MambaAttnBackend(AttentionBackend):
                 head_q=head_k_dim,
                 head_k=head_k_dim,
                 head_v=head_v_dim,
+                fuse_l2norm=False,
                 replay=replay_inputs,
                 valid_tokens=valid_tokens,
             )

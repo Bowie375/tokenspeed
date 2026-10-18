@@ -1160,3 +1160,76 @@ def triton_gdn_replay_commit(
         ENABLE_PDL=enable_pdl,
         **({"launch_pdl": True} if enable_pdl else {}),
     )
+
+
+from tokenspeed_kernel.ops.attention.gdn._triton.gating import (
+    fused_gdn_gating as _gpu_gdn_gating,
+)
+
+
+@register_kernel(
+    "attention",
+    "gdn_decay_gate",
+    name="triton_gdn_decay_gate",
+    solution="triton",
+    capability=CapabilityRequirement(vendors=frozenset({"nvidia", "amd"})),
+    signatures=format_signatures(
+        "a", "dense", {torch.float16, torch.bfloat16, torch.float32}
+    ),
+    priority=Priority.PORTABLE,
+)
+def triton_gdn_decay_gate(A_log, a, dt_bias, *, beta, threshold):
+    return _gpu_gdn_gating(A_log, a, dt_bias, beta=beta, threshold=threshold)
+
+
+@register_kernel(
+    "attention",
+    "gdn_pack_projection",
+    name="triton_pack_gdn_projection",
+    solution="triton",
+    capability=CapabilityRequirement(vendors=frozenset({"nvidia", "amd"})),
+    signatures=format_signatures(
+        "mixed_qkv", "dense", {torch.float16, torch.bfloat16, torch.float32}
+    ),
+    priority=Priority.PORTABLE,
+)
+def triton_pack_gdn_projection(mixed_qkv, a, b):
+    return pack_gdn_projection(mixed_qkv, a, b)
+
+
+@register_kernel(
+    "attention",
+    "gdn_split_qkv",
+    name="triton_split_gdn_qkv",
+    solution="triton",
+    capability=CapabilityRequirement(vendors=frozenset({"nvidia", "amd"})),
+    signatures=format_signatures(
+        "mixed_qkv", "dense", {torch.float16, torch.bfloat16, torch.float32}
+    ),
+    priority=Priority.PORTABLE,
+)
+def triton_split_gdn_qkv(
+    mixed_qkv,
+    num_q_heads,
+    num_k_heads,
+    num_v_heads,
+    head_q,
+    head_k,
+    head_v,
+    *,
+    fuse_l2norm,
+    replay,
+    valid_tokens,
+):
+    return fused_qkv_split_gdn_prefill(
+        mixed_qkv,
+        num_q_heads,
+        num_k_heads,
+        num_v_heads,
+        head_q,
+        head_k,
+        head_v,
+        fuse_l2norm=fuse_l2norm,
+        replay=replay,
+        valid_tokens=valid_tokens,
+    )

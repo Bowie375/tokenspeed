@@ -56,12 +56,16 @@ from tokenspeed_kernel.ops.conv.triton import (
     select_prefill_config,
 )
 from tokenspeed_kernel.platform import pdl_enabled
+from tokenspeed_kernel.selection import select_kernel
+from tokenspeed_kernel.signature import dense_tensor_format, format_signature
 
 PAD_SLOT_ID = -1
 
 __all__ = [
     "PAD_SLOT_ID",
     "dflash2_grouped_conv",
+    "causal_conv1d_fn",
+    "causal_conv1d_update",
     "inkling_ring_sconv",
     "seq_idx_from_cu_seqlens",
 ]
@@ -248,3 +252,136 @@ def inkling_ring_sconv(
         **({"launch_pdl": True} if enable_pdl else {}),
     )
     return y
+
+
+def _state_layout(state: torch.Tensor, weight: torch.Tensor) -> str:
+    if (
+        state.ndim == 3
+        and state.shape[1] == weight.shape[1] - 1
+        and state.shape[2] == weight.shape[0]
+    ):
+        return "width_major"
+    return "channel_major"
+
+
+def causal_conv1d_fn(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    conv_states: torch.Tensor,
+    query_start_loc: torch.Tensor,
+    *,
+    cache_indices: torch.Tensor | None,
+    has_initial_state: torch.Tensor | None,
+    activation: str | None,
+    pad_slot_id: int | None,
+    validate_data: bool,
+    prefill_metadata,
+):
+    """Convolve packed tokens and update the supplied raw-history cache.
+
+    Args:
+        x: Packed [channels,tokens] input.
+        weight: [channels,width] oldest-to-newest convolution taps.
+        bias: Optional per-channel bias.
+        conv_states: Cache pool in channel-major or width-major history layout.
+        query_start_loc: Device packed sequence boundaries [requests+1].
+        cache_indices: Optional per-request slots; None uses request order.
+        has_initial_state: Optional per-request history flags; None means zeros.
+        activation: Identity (None/False) or SiLU (True/silu/swish).
+        pad_slot_id: Optional slot sentinel to skip.
+        validate_data: Whether to validate device metadata values on the host.
+        prefill_metadata: Device program-to-request/chunk scheduling maps.
+
+    Returns:
+        Convolution output shaped like x; live cache slots are updated in place.
+    """
+    kernel = select_kernel(
+        "attention",
+        "causal_conv1d_prefill",
+        format_signature(x=dense_tensor_format(x.dtype)),
+        traits={
+            "width": weight.shape[1],
+            "state_layout": _state_layout(conv_states, weight),
+        },
+    )
+    return kernel(
+        x=x,
+        weight=weight,
+        bias=bias,
+        conv_states=conv_states,
+        query_start_loc=query_start_loc,
+        cache_indices=cache_indices,
+        has_initial_state=has_initial_state,
+        activation=activation,
+        pad_slot_id=pad_slot_id,
+        validate_data=validate_data,
+        prefill_metadata=prefill_metadata,
+    )
+
+
+def causal_conv1d_update(
+    x: torch.Tensor,
+    conv_state: torch.Tensor,
+    weight: torch.Tensor,
+    *,
+    bias: torch.Tensor | None,
+    activation: bool | str | None,
+    cache_seqlens: torch.Tensor | None,
+    conv_state_indices: torch.Tensor | None,
+    num_accepted_tokens: torch.Tensor | None,
+    intermediate_conv_window: torch.Tensor | None,
+    output_state_indices: torch.Tensor | None,
+    pad_slot_id: int | None,
+    validate_data: bool,
+    parent_indices: torch.Tensor | None,
+):
+    """Convolve decode tokens and advance cache-managed raw history.
+
+    Args:
+        x: [requests,channels] or [requests,channels,tokens] decode input.
+        conv_state: Cache pool in channel-major or width-major history layout.
+        weight: [channels,width] oldest-to-newest taps.
+        bias: Optional per-channel bias.
+        activation: Identity (None/False) or SiLU (True/silu/swish).
+        cache_seqlens: Optional circular-history positions.
+        conv_state_indices: Optional per-request read slots; None uses row order.
+        num_accepted_tokens: Optional speculative acceptance counts.
+        intermediate_conv_window: Optional speculative history output.
+        output_state_indices: Optional write slots; None updates read slots.
+        pad_slot_id: Optional slot sentinel to skip.
+        validate_data: Whether to validate device metadata values on the host.
+        parent_indices: Optional speculative tree parents.
+
+    Returns:
+        Decode output, with live history slots updated in place. Ascend supports
+        one token, overwrites x and rejects circular/speculative arguments.
+    """
+    kernel = select_kernel(
+        "attention",
+        "causal_conv1d_update",
+        format_signature(x=dense_tensor_format(x.dtype)),
+        traits={
+            "width": weight.shape[1],
+            "tree": parent_indices is not None,
+            "state_layout": _state_layout(conv_state, weight),
+        },
+    )
+    return kernel(
+        x=x,
+        conv_state=conv_state,
+        weight=weight,
+        bias=bias,
+        activation=activation,
+        cache_seqlens=cache_seqlens,
+        conv_state_indices=conv_state_indices,
+        num_accepted_tokens=num_accepted_tokens,
+        intermediate_conv_window=intermediate_conv_window,
+        output_state_indices=output_state_indices,
+        pad_slot_id=pad_slot_id,
+        validate_data=validate_data,
+        parent_indices=parent_indices,
+    )
+
+
+import tokenspeed_kernel.ops.conv.ascend  # noqa: E402,F401
