@@ -20,6 +20,12 @@ extension uses device boundary differences. Host prefill boundaries must
 cover all query rows and fit the supplied maximum length. Empty queries
 return without calling CANN. Inputs and paged caches remain unchanged.
 
+Single-token query capacity selects CANN's decode-like BSH tiler, which rejects
+the compressed causal mask. Prefill and causal extension omit that mask and
+use dense visibility for this case: an uncached one-token sequence has one
+key, and a sole cached query occupies the rightmost live position. Empty
+requests contribute no packed output. Multi-token causality is unchanged.
+
 Causal uncached prefill uses the upper-triangular mask. Paged causal extension
 uses CANN's right-aligned causal mask so each new query attends its cached
 prefix and preceding new tokens. GQA extension with multiple query tokens
@@ -32,7 +38,7 @@ update contract.
 python -m pytest -q tokenspeed-kernel-npu/test/test_mha.py
 ```
 
-Tests cover 64- and 256-wide heads, GQA, ragged and empty sequences, strided
+Tests cover 64- and 256-wide heads, GQA, single-token/ragged/empty sequences, strided
 queries, custom softmax scaling, multi-page cached prefixes, decode and graph
 replay with changing cache lengths. CPU FP64 comparisons use dtype-specific
 absolute/relative tolerances and relative L2 bounds for native mixed-precision

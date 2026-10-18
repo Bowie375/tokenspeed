@@ -391,3 +391,71 @@ def test_prefill_rejects_capacity_smaller_than_live_sequence():
         mha_prefill(
             q, k, k, torch.tensor([0, 3], device="npu", dtype=torch.int32), [0, 3], 2
         )
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+@pytest.mark.parametrize("head_dim", [64, 256])
+@pytest.mark.parametrize("lengths", [[1], [1, 1], [0, 1, 0]])
+@torch.inference_mode()
+def test_one_token_prefill_returns_each_requests_value(dtype, head_dim, lengths):
+    from tokenspeed_kernel.ops.attention.mha import mha_prefill as shared_prefill
+
+    tokens = sum(lengths)
+    q = torch.randn(tokens, 8, head_dim, device="npu", dtype=dtype)
+    k = torch.randn(tokens, 2, head_dim, device="npu", dtype=dtype)
+    v = torch.randn_like(k)
+    original = [tensor.clone() for tensor in (q, k, v)]
+    bounds_cpu = [0]
+    for length in lengths:
+        bounds_cpu.append(bounds_cpu[-1] + length)
+    bounds = torch.tensor(bounds_cpu, device="npu", dtype=torch.int32)
+    actual = shared_prefill(
+        q=q, k=k, v=v, cu_seqlens=bounds, cu_seqlens_cpu=bounds_cpu, max_seqlen=1
+    )
+    torch.testing.assert_close(actual, v.repeat_interleave(4, dim=1), rtol=0, atol=0)
+    for tensor, saved in zip((q, k, v), original):
+        torch.testing.assert_close(tensor, saved, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("head_dim", [64, 256])
+@pytest.mark.parametrize("page_size", [64, 128])
+@torch.inference_mode()
+def test_one_token_causal_extension_attends_entire_live_prefix(head_dim, page_size):
+    torch.manual_seed(73)
+    q = torch.randn(2, 8, head_dim, device="npu", dtype=torch.bfloat16)
+    k = torch.randn(4, page_size, 2, head_dim, device="npu", dtype=q.dtype)
+    v = torch.randn_like(k)
+    table = torch.tensor([[3, 0], [2, 1]], device="npu", dtype=torch.int32)
+    lengths = [3, page_size + 5]
+    output = mha_extend_with_kvcache(
+        q,
+        torch.tensor([0, 1, 2], device="npu", dtype=torch.int32),
+        torch.tensor([0, 3, 3 + lengths[1]], device="npu", dtype=torch.int32),
+        k,
+        v,
+        table,
+        torch.tensor(lengths, device="npu", dtype=torch.int32),
+        1,
+        max(lengths),
+        is_causal=True,
+    )
+    expected = []
+    for row, length in enumerate(lengths):
+        query = q[row : row + 1].cpu().double().transpose(0, 1)
+        key = (
+            _paged_rows(k, table, row, length)
+            .cpu()
+            .double()
+            .repeat_interleave(4, dim=1)
+            .transpose(0, 1)
+        )
+        value = (
+            _paged_rows(v, table, row, length)
+            .cpu()
+            .double()
+            .repeat_interleave(4, dim=1)
+            .transpose(0, 1)
+        )
+        scores = query @ key.transpose(-1, -2) / math.sqrt(head_dim)
+        expected.append((scores.softmax(-1) @ value).transpose(0, 1))
+    _check_native_attention(output, torch.cat(expected))

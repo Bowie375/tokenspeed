@@ -209,18 +209,21 @@ def mha_prefill(
         raise ValueError(
             "prefill host boundaries must cover the query and fit max_seqlen"
         )
+    # With one query/key token, causality allows the entire live sequence.
+    # CANN selects its decode-like BSH tiler and rejects compressed causal masks.
+    needs_causal_mask = max_seqlen > 1
     output, _ = torch_npu.npu_fused_infer_attention_score(
         _pack_bsh(q, cu_seqlens, max_seqlen),
         _pack_bsh(k, cu_seqlens, max_seqlen),
         _pack_bsh(v, cu_seqlens, max_seqlen),
-        atten_mask=_causal_mask(q.device),
+        atten_mask=_causal_mask(q.device) if needs_causal_mask else None,
         actual_seq_lengths=lengths,
         actual_seq_lengths_kv=lengths,
         num_heads=q.shape[1],
         num_key_value_heads=k.shape[1],
         scale=_scale(q, softmax_scale),
         input_layout="BSH",
-        sparse_mode=2,
+        sparse_mode=2 if needs_causal_mask else 0,
     )
     return _unpack_bsh(output, cu_seqlens, q)
 
@@ -267,11 +270,13 @@ def mha_extend_with_kvcache(
         )
     if q.shape[0] == 0:
         return torch.empty_like(q)
+    # The sole query is at the right edge of its cache, so every live key is causal.
+    needs_causal_mask = is_causal and max_seqlen_q > 1
     output, _ = torch_npu.npu_fused_infer_attention_score(
         _pack_bsh(q, cu_seqlens_q, max_seqlen_q),
         k_cache.flatten(2),
         v_cache.flatten(2),
-        atten_mask=_causal_mask(q.device) if is_causal else None,
+        atten_mask=_causal_mask(q.device) if needs_causal_mask else None,
         actual_seq_lengths=cu_seqlens_q[1:] - cu_seqlens_q[:-1],
         actual_seq_lengths_kv=cache_seqlens,
         block_table=page_table,
@@ -279,7 +284,7 @@ def mha_extend_with_kvcache(
         num_key_value_heads=k_cache.shape[2],
         scale=_scale(q, softmax_scale),
         input_layout="BSH",
-        sparse_mode=3 if is_causal else 0,
+        sparse_mode=3 if needs_causal_mask else 0,
         block_size=k_cache.shape[1],
     )
     return _unpack_bsh(output, cu_seqlens_q, q)
