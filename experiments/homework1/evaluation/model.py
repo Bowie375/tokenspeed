@@ -49,6 +49,8 @@ def native_run(
     lifecycle: bool,
     reuse_attempts: int,
     failure_policy: str,
+    seed: int,
+    eos_token_ids: list[int],
 ):
     """Run real Engine jobs with cached decode in an owned subprocess group.
 
@@ -172,6 +174,10 @@ def native_run(
         str(capacity),
         "--context-length",
         str(context_length),
+        "--seed",
+        str(seed),
+        "--eos-token-ids",
+        json.dumps(eos_token_ids),
     ]
     (directory / "command.json").write_text(json.dumps(command))
     with (directory / "worker.log").open("w") as log:
@@ -196,6 +202,11 @@ def native_run(
                     )
                 )
             )
+            if code and failure_policy == "record":
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
             if code and failure_policy == "raise":
                 raise RuntimeError(
                     f'Native worker exited {code}; see {directory / "worker.log"}'
@@ -282,12 +293,13 @@ class Reference:
         return result
 
     @torch.inference_mode()
-    def greedy(self, fixture: Fixture, *, steps: int) -> list[dict]:
+    def greedy(
+        self, fixture: Fixture, *, steps: int, eos_token_ids: list[int]
+    ) -> list[dict]:
         cache = None
         ids = fixture.input_ids
         result = []
-        eos = self.model.generation_config.eos_token_id
-        eos = {eos} if isinstance(eos, int) else set(eos or [])
+        eos = set(eos_token_ids)
         for step in range(steps):
             output = self.model(
                 input_ids=torch.tensor([ids]),
@@ -405,6 +417,7 @@ def compare_generation(
     *,
     steps: int,
     tokenizer,
+    eos_token_ids: list[int],
 ):
     """Report first greedy divergence and aligned-prefix margins, separately from numerics."""
     results = []
@@ -418,7 +431,7 @@ def compare_generation(
                 details=dict(stage="generation_unavailable"),
             )
             actual = []
-        expected = reference.greedy(fixture, steps=steps)
+        expected = reference.greedy(fixture, steps=steps, eos_token_ids=eos_token_ids)
         a = [row["sampled_token"] for row in actual]
         b = [row["token"] for row in expected]
         first = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)
@@ -441,6 +454,7 @@ def compare_generation(
                 reference_margin_at_difference=margin,
                 exact_match=a == b,
                 ignore_eos=False,
+                eos_token_ids=eos_token_ids,
             )
         )
         torch.save(

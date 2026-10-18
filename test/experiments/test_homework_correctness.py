@@ -206,3 +206,15 @@ def test_unavailable_check_prevents_passing_summary_and_keeps_reason(tmp_path):
     failure = json.loads((run.path / "failures.json").read_text())[0]
     assert failure["reason"] == "worker died"
     assert failure["details"]["log"] == "native/worker.log"
+
+
+def test_shared_eos_policy_includes_chat_end_and_model_eos():
+    from experiments.homework1.evaluation.fixtures import shared_eos_ids
+
+    assert shared_eos_ids(248046, 248044) == [248044, 248046]
+    assert shared_eos_ids(3, [3, 7]) == [3, 7]
+    assert shared_eos_ids(None, [4]) == [4]
+    with pytest.raises(ValueError):
+        shared_eos_ids(None, None)
+    with pytest.raises(ValueError):
+        shared_eos_ids(-1, 4)

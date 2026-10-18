@@ -87,3 +87,12 @@ Separate zero-tolerance rows compare those positions with canonical text positio
 This distinguishes arithmetic/cache errors from an incorrect runtime position
 sequence without masking either problem. A failed position check keeps the
 complete result failed, even when the associated logit error is small.
+
+Free generation explicitly uses the union of the tokenizer and model EOS IDs
+for both implementations, saved in `generation_policy.json`. For this checkpoint
+those IDs are 248046 (`im_end`) and 248044. Comparing each library's implicit
+EOS default would incorrectly report a divergence after an already completed
+arithmetic answer.
+
+See [VALIDATION.md](VALIDATION.md) for recorded coverage, the remaining cached
+position failure, the 2,048-token boundary diagnostics and links to local evidence.

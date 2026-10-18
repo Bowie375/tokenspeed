@@ -172,3 +172,23 @@ def environment_manifest(
         visible_devices=os.environ.get("ASCEND_RT_VISIBLE_DEVICES"),
         reference="HF CPU FP32 eager",
     )
+
+
+def shared_eos_ids(tokenizer_eos, model_eos) -> list[int]:
+    """Use the union of tokenizer and model EOS IDs for both implementations.
+
+    TokenSpeed stops on either source. HF's default generation configuration can
+    contain only the model ID; its greedy reference must receive the same set.
+    """
+    result = set()
+    for source in (tokenizer_eos, model_eos):
+        values = (
+            [] if source is None else [source] if isinstance(source, int) else source
+        )
+        for token in values:
+            if type(token) is not int or token < 0:
+                raise ValueError("EOS IDs must be nonnegative integers")
+            result.add(token)
+    if not result:
+        raise ValueError("An explicit EOS policy is required")
+    return sorted(result)

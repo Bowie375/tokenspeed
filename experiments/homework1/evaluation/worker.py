@@ -32,6 +32,8 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--capacity", type=int, required=True)
     parser.add_argument("--context-length", type=int, required=True)
+    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--eos-token-ids", type=json.loads, required=True)
     options = parser.parse_args()
     directory = options.directory
     from tokenspeed.runtime.entrypoints.engine import Engine
@@ -56,7 +58,8 @@ def main():
         max_total_tokens=options.capacity,
         max_prefill_tokens=options.context_length,
         chunked_prefill_size=options.context_length,
-        seed=17,
+        seed=options.seed,
+        mamba_ssm_dtype="float32",
         log_level="warning",
     )
     try:
@@ -72,6 +75,7 @@ def main():
                     temperature=0,
                     max_new_tokens=job["steps"],
                     ignore_eos=job["teacher"],
+                    stop_token_ids=[] if job["teacher"] else options.eos_token_ids,
                 ),
             )
             (directory / f"{job['name']}_response.json").write_text(
