@@ -514,11 +514,10 @@ class Qwen3VLMoeVisionModel(nn.Module):
 
             indices = (h_grid_idx + w_grid).reshape(4, -1)
             weights = torch.stack([w00, w01, w10, w11], dim=0).reshape(4, -1, 1)
-            weights = weights.to(dtype=self.dtype)
-
-            embeds = self.pos_embed(indices)
-            embeds *= weights
-            combined = embeds.sum(dim=0)
+            # Interpolate in FP32 and round once, as the checkpoint reference
+            # does. BF16 products/sums amplify position errors across blocks.
+            embeds = self.pos_embed(indices).float()
+            combined = (embeds * weights).sum(dim=0).to(self.dtype)
 
             combined = combined.reshape(
                 h // m_size, m_size, w // m_size, m_size, hidden_dim

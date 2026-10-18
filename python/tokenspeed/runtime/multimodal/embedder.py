@@ -106,7 +106,9 @@ def _drop_prefilled_encodings(items: list[MultimodalDataItem]) -> None:
 
     def drop(tensor: torch.Tensor | None) -> None:
         if tensor is not None and tensor.device.type != "cpu":
-            tensor.record_stream(torch.cuda.current_stream(tensor.device))
+            tensor.record_stream(
+                torch.get_device_module(tensor.device).current_stream(tensor.device)
+            )
 
     for item in items:
         drop(item.encoded)
@@ -158,8 +160,8 @@ def warmup_multimodal_encoders(
             with torch.inference_mode():
                 output = spec.fn(items)
                 del output
-                if warmup_device.type == "cuda":
-                    torch.cuda.synchronize(warmup_device)
+                if warmup_device.type != "cpu":
+                    torch.get_device_module(warmup_device).synchronize(warmup_device)
         except Exception:
             logger.exception(
                 f"Multimodal encoder warmup failed: modality={modality.name.lower()!s}",
@@ -367,6 +369,10 @@ class MultimodalEmbedder:
                 )
                 encode_events[0].record(torch.cuda.current_stream(input_ids.device))
             else:
+                if input_ids.device.type != "cpu":
+                    torch.get_device_module(input_ids.device).synchronize(
+                        input_ids.device
+                    )
                 encode_started = time.perf_counter()
         self._encode(
             plan,
@@ -383,6 +389,10 @@ class MultimodalEmbedder:
                 encode_events[1].synchronize()
                 encode_elapsed_ms = encode_events[0].elapsed_time(encode_events[1])
             elif encode_started is not None:
+                if input_ids.device.type != "cpu":
+                    torch.get_device_module(input_ids.device).synchronize(
+                        input_ids.device
+                    )
                 encode_elapsed_ms = (time.perf_counter() - encode_started) * 1000
 
         alias_started = time.perf_counter() if LOG_MM_TIMING else None

@@ -131,3 +131,9 @@ Verify the gRPC servicer and the source paths together:
 PYTHONPATH="${PWD}/python:${PWD}/tokenspeed-kernel/python:${PWD}/tokenspeed-kernel-npu/python:${PYTHONPATH:-}" \
     python -m smg_grpc_servicer.tokenspeed --help
 ```
+
+## Qwen3.5 image inference
+
+The Ascend multimodal attention backend reuses the existing Qwen vision tower.
+See [environment, numerical tests and image serving](../docs/guides/ascend-qwen35-vision.md)
+for the pinned checkpoint, BF16 precision criteria and eager execution scope.
