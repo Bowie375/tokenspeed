@@ -89,6 +89,11 @@ on device and reused across layers. See the
 [state preparation and metadata contract](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/gdn/README.md#ascend-state-preparation-and-metadata)
 for null blocks, padding, checkpoint ownership and tests.
 
+Ascend MHA prefill and cached extension use CANN's BSH layout, including
+Qwen3.5's 256-wide heads, with device-side packed/ragged conversion. See the
+[MHA layout contract and tests](../tokenspeed-kernel/python/tokenspeed_kernel/ops/attention/mha/README.md#ascend-layout-contract)
+for CANN page constraints and numerical coverage.
+
 ## Serving dependencies in a source checkout
 
 When running TokenSpeed directly from a checkout through `PYTHONPATH`, install
