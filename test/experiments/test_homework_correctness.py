@@ -101,3 +101,108 @@ def test_artifacts_preserve_failed_comparisons_and_reject_overwrite(tmp_path):
     assert json.loads((run.path / "manifest.json").read_text())["seed"] == 17
     with pytest.raises(FileExistsError):
         RunArtifacts(tmp_path, run_id="case", manifest={})
+
+
+def test_saved_fixtures_roundtrip_without_retokenizing(tmp_path):
+    from experiments.homework1.evaluation.fixtures import (
+        Fixture,
+        load_fixtures,
+        save_fixtures,
+    )
+
+    fixtures = [
+        Fixture("zh", [19, 8, 2], [3, 4], "chat", "中文"),
+        Fixture("length", [4] * 129, [7], "raw", ""),
+    ]
+    target = tmp_path / "fixtures.json"
+    save_fixtures(target, fixtures)
+    assert load_fixtures(target) == fixtures
+    with pytest.raises(ValueError, match="unique"):
+        save_fixtures(target, fixtures + fixtures)
+
+
+def test_native_step_evidence_requires_complete_sequence(tmp_path):
+    from experiments.homework1.evaluation.fixtures import Fixture
+    from experiments.homework1.evaluation.model import load_steps
+
+    fixture = Fixture("a", [1, 3], [5], "raw", "")
+    (tmp_path / "job").mkdir()
+    with pytest.raises(RuntimeError, match="No captures"):
+        load_steps(tmp_path, "job", fixture)
+    torch.save(
+        dict(step=0, input_ids=[1, 3], logits=torch.tensor([1.0, 3.0])),
+        tmp_path / "job/a_000.pt",
+    )
+    assert load_steps(tmp_path, "job", fixture)[0]["input_ids"] == [1, 3]
+    torch.save(
+        dict(step=2, input_ids=[5], logits=torch.tensor([3.0, 1.0])),
+        tmp_path / "job/a_002.pt",
+    )
+    with pytest.raises(RuntimeError, match="Missing"):
+        load_steps(tmp_path, "job", fixture)
+
+
+def test_capture_preserves_logits_and_records_true_teacher_sequence(tmp_path):
+    from experiments.homework1.evaluation.capture import Capture
+    from tokenspeed.runtime.sampling.sampling_batch_info import SamplingBatchInfo
+
+    capture = Capture(tmp_path)
+    capture.job = dict(
+        name="teacher",
+        steps=2,
+        teacher=True,
+        fixtures=[dict(name="a", input_ids=[2, 7], continuation_ids=[9, 3])],
+    )
+    info = SamplingBatchInfo(req_pool_indices=torch.tensor([5]), device="cpu")
+    logits = torch.tensor([[1.0, 4.0, 2.0]])
+    original = logits.clone()
+    for step, ids in enumerate(([2, 7], [9])):
+        capture.pending = dict(
+            model_logits=logits.clone(),
+            ids=torch.tensor(ids),
+            positions=torch.arange(len(ids)),
+            bounds=[0, len(ids)],
+            batch_number=step,
+            batch_size=1,
+            mode="extend" if step == 0 else "decode",
+            num_extends=1 if step == 0 else 0,
+            cached_decode=step > 0,
+        )
+        token = logits.argmax(-1)
+        capture.sample(logits, info, token)
+        assert token.tolist() == [[9, 3][step]]
+        torch.testing.assert_close(logits, original, rtol=0, atol=0)
+        saved = torch.load(tmp_path / f"teacher/a_{step:03d}.pt", weights_only=True)
+        assert saved["step"] == step
+        assert saved["input_ids"] == ids
+        assert saved["cached_decode"] == (step > 0)
+        torch.testing.assert_close(saved["logits"], original[0])
+    assert len(list((tmp_path / "teacher").glob("*.pt"))) == 2
+
+
+def test_empty_runs_do_not_count_as_passing_evidence(tmp_path):
+    run = RunArtifacts(tmp_path, run_id="empty", manifest={})
+    assert run.summary() == dict(total=0, passed=0, failed=0, all_passed=False)
+
+
+def test_fixture_rejects_path_traversal_and_invalid_tokens():
+    from experiments.homework1.evaluation.fixtures import Fixture
+
+    with pytest.raises(ValueError, match="name"):
+        Fixture("../escape", [1], [2], "raw", "")
+    with pytest.raises(ValueError, match="token"):
+        Fixture("negative", [1, -2], [3], "raw", "")
+
+
+def test_unavailable_check_prevents_passing_summary_and_keeps_reason(tmp_path):
+    run = RunArtifacts(tmp_path, run_id="failed_worker", manifest={})
+    run.record(
+        "available", torch.ones(1), torch.ones(1), limits=Limits(0, 0, 0, 0), details={}
+    )
+    run.record_failure(
+        "long_decode", "worker died", details={"log": "native/worker.log"}
+    )
+    assert run.summary() == dict(total=2, passed=1, failed=1, all_passed=False)
+    failure = json.loads((run.path / "failures.json").read_text())[0]
+    assert failure["reason"] == "worker died"
+    assert failure["details"]["log"] == "native/worker.log"

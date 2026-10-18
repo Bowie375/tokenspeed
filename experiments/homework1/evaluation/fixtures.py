@@ -27,6 +27,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import subprocess
 from pathlib import Path
 
@@ -40,6 +41,8 @@ class Fixture:
     formatted_text: str
 
     def __post_init__(self):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self.name):
+            raise ValueError("fixture name must be a simple artifact name")
         if not self.input_ids or any(
             not isinstance(x, int) or x < 0
             for x in self.input_ids + self.continuation_ids
@@ -157,6 +160,11 @@ def environment_manifest(
         checkpoint=str(checkpoint.resolve()),
         checkpoint_revision=revision,
         checkpoint_file_hashes=hashes,
+        evaluation_source_hashes={
+            str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted((root / "experiments/homework1").rglob("*.py"))
+        },
+        ascend_home_path=os.environ.get("ASCEND_HOME_PATH"),
         python=platform.python_version(),
         packages=packages,
         seed=seed,

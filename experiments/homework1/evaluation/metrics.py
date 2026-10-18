@@ -89,6 +89,7 @@ class RunArtifacts:
         self.path = Path(root) / run_id
         self.path.mkdir(parents=True, exist_ok=False)
         self.rows: list[dict] = []
+        self.failures: list[dict] = []
         (self.path / "tensors").mkdir()
         self.write_json("manifest.json", manifest)
 
@@ -130,12 +131,19 @@ class RunArtifacts:
         self.write_json("metrics.json", self.rows)
         return row
 
+    def record_failure(self, name: str, reason: str, *, details: dict):
+        """Persist unavailable/failed checks without inventing tensor comparisons."""
+        self.failures.append(dict(name=name, reason=reason, details=details))
+        self.write_json("failures.json", self.failures)
+
     def summary(self):
         """Return aggregate comparison counts; an empty run is not a passing run."""
         passed = sum(row["passed"] for row in self.rows)
         return dict(
-            total=len(self.rows),
+            total=len(self.rows) + len(self.failures),
             passed=passed,
-            failed=len(self.rows) - passed,
-            all_passed=bool(self.rows) and passed == len(self.rows),
+            failed=len(self.rows) - passed + len(self.failures),
+            all_passed=bool(self.rows)
+            and passed == len(self.rows)
+            and not self.failures,
         )
