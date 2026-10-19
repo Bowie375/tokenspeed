@@ -19,4 +19,4 @@
 # SOFTWARE.
 
 
-"""Reusable Step 12 Ascend performance experiments."""
+"""Reusable Ascend performance experiments."""

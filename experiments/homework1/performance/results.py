@@ -176,7 +176,7 @@ def finish(directory: Path, config: PerformanceConfig, *, worker_status: dict) -
         )
 
     lines = [
-        "# Step 12 performance evidence",
+        "# Performance evidence",
         "",
         f"Run: `{directory.name}`.",
         "",
@@ -216,7 +216,7 @@ def finish(directory: Path, config: PerformanceConfig, *, worker_status: dict) -
         "",
         "## Correctness and completeness",
         "",
-        f"Linked Step 11 evidence: `{evidence}`. Performance measurements do not clear outstanding correctness failures.",
+        f"Linked correctness evidence: `{evidence}`. Performance measurements do not clear outstanding correctness failures.",
         f"Observed short and long NPU profiles: **{result['short_and_long_device_profiles_observed']}**. Failed requests: `{result['failed_requests']}`.",
         "",
         "Reduced-repetition or altered-length runs are smoke validation, not the default ten-repetition baseline. Raw samples and errors are retained even when a request fails or the worker times out.",

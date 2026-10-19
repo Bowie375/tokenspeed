@@ -19,7 +19,7 @@
 # SOFTWARE.
 
 
-"""Prepare reproducible Step 12 artifacts and launch an isolated native worker."""
+"""Prepare reproducible performance artifacts and launch an isolated native worker."""
 
 import argparse
 import dataclasses
@@ -47,7 +47,7 @@ from experiments.homework1.performance.results import finish
 
 
 def find_fixture_source(root: Path, *, input_lengths: tuple[int, int]) -> Path:
-    """Find the newest saved Step 11 run covering both requested raw lengths."""
+    """Find the newest saved correctness run covering both requested raw lengths."""
     candidates = sorted(
         (root / "outputs/homework1/correctness/runs").glob("*/fixtures.json"),
         reverse=True,
@@ -59,7 +59,7 @@ def find_fixture_source(root: Path, *, input_lengths: tuple[int, int]) -> Path:
         }:
             return path
     raise FileNotFoundError(
-        f"Run Step 11 first with raw lengths {input_lengths}, or explicitly select saved fixtures"
+        f"Run the correctness notebook first with raw lengths {input_lengths}, or explicitly select saved fixtures"
     )
 
 
@@ -91,7 +91,7 @@ def prepare_run(
     policy_path = fixtures_path.parent / "generation_policy.json"
     if not policy_path.exists():
         raise FileNotFoundError(
-            "saved fixtures need their Step 11 generation_policy.json with explicit EOS IDs"
+            "saved fixtures need their correctness generation_policy.json with explicit EOS IDs"
         )
     policy = json.loads(policy_path.read_text())
     if not policy["eos_token_ids"]:

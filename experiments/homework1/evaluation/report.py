@@ -118,7 +118,7 @@ def finish(
     )
     run.write_json("summary.json", summary)
     lines = [
-        "# Step 11 results",
+        "# Correctness results",
         "",
         f"Run: `{run.path.name}`",
         "",

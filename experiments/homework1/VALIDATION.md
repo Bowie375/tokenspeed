@@ -1,4 +1,4 @@
-# Recorded Step 11 validation
+# Recorded correctness validation
 
 The prefill sampling-offset implementation now preserves the live accepted
 cache frontier. The full default notebook matrix has **1,059 passing and five
@@ -95,9 +95,9 @@ Graphs, prefix caching, transfer/retraction, vision and performance are outside
 this eager correctness run.
 
 
-## Step 12 performance workflow validation
+## Performance workflow validation
 
-The [performance notebook](notebooks/12_performance.ipynb) completed a real
+The [performance notebook](notebooks/performance.ipynb) completed a real
 single-visible-NPU smoke run on the same pinned checkpoint:
 [report](../../outputs/homework1/performance/runs/20261019T165601Z_3d82ccc9/report.md),
 [summary](../../outputs/homework1/performance/runs/20261019T165601Z_3d82ccc9/summary.json),
@@ -128,5 +128,5 @@ The captured Python source hashes match the implementation used for this run.
 This is workflow smoke coverage, **not** the default 128/2048-input by
 32/128-output, ten-repetition performance baseline. The saved completeness
 flags remain false for that baseline. The notebook retains those full defaults
-for the homework measurement. The five linked Step 11 state-precision failures
+for the homework measurement. The five linked correctness state-precision failures
 also remain unresolved by this performance work.

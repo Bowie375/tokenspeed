@@ -1,9 +1,9 @@
 # Homework 1 evaluation and performance experiments
 
-Step 11 uses one notebook backed by ordinary Python helpers. Source, fixtures,
+Correctness evaluation uses one notebook backed by ordinary Python helpers. Source, fixtures,
 comparisons and native captures have separate lifetimes:
 
-- `notebooks/11_correctness.ipynb`: ordered, restartable evaluation and inspection.
+- `notebooks/correctness.ipynb`: ordered, restartable evaluation and inspection.
 - `evaluation/fixtures.py`: exact saved token IDs and environment provenance.
 - `evaluation/metrics.py`: explicit limits, FP64 metrics, persistent tensor evidence.
 - `evaluation/model.py`, `gdn.py`: native serving and independent HF comparisons.
@@ -25,7 +25,7 @@ running adaptation comparisons; generation exact matches are reported separately
 
 Activate the project environment and CANN before starting the notebook kernel.
 Choose one free chip using `ASCEND_RT_VISIBLE_DEVICES`; do not reuse a serving
-process's chip. Open [11_correctness.ipynb](notebooks/11_correctness.ipynb), select
+process's chip. Open [correctness.ipynb](notebooks/correctness.ipynb), select
 that environment's Python kernel, and restart/run all. The repository root is
 found from the notebook's working directory. The checkpoint defaults to the
 existing `outputs/models/Qwen3.5-0.8B`; set `HOMEWORK_EVAL_MODEL` to another local
@@ -98,11 +98,11 @@ See [VALIDATION.md](VALIDATION.md) for recorded coverage, the fixed cached-posit
 bug, remaining state-precision failures and links to local evidence.
 
 
-## Step 12 performance baseline
+## Performance baseline
 
-Open [12_performance.ipynb](notebooks/12_performance.ipynb), select the activated
+Open [performance.ipynb](notebooks/performance.ipynb), select the activated
 project environment, and restart/run all. Select one free chip before starting
-Jupyter. The notebook loads exact saved Step 11 token-ID fixtures, records the
+Jupyter. The notebook loads exact saved correctness token-ID fixtures, records the
 checkpoint/source/configuration, and starts a disposable native Engine. It uses
 BF16 eager text inference, FP32 recurrent state, greedy sampling, one request at
 a time, no prefix caching, no overlap and no speculation. The main computation
@@ -128,7 +128,7 @@ initialization/allocation; no old recurrent state is manually replayed.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `HOMEWORK_PERF_MODEL` | local Qwen3.5-0.8B | Local checkpoint; no download |
-| `HOMEWORK_PERF_FIXTURES` | newest compatible Step 11 run | Exact saved fixtures plus generation policy |
+| `HOMEWORK_PERF_FIXTURES` | newest compatible correctness run | Exact saved fixtures plus generation policy |
 | `HOMEWORK_PERF_INPUT_LENGTHS` | `128,2048` | Two distinct saved raw lengths |
 | `HOMEWORK_PERF_OUTPUT_LENGTHS` | `32,128` | Two distinct output targets |
 | `HOMEWORK_PERF_WARMUPS` | `3` | Warmups per shape in each timing pass |

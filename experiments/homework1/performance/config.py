@@ -19,7 +19,7 @@
 # SOFTWARE.
 
 
-"""Explicit Step 12 workloads and one comparable eager Ascend configuration."""
+"""Explicit performance workloads and one comparable eager Ascend configuration."""
 
 from dataclasses import dataclass
 

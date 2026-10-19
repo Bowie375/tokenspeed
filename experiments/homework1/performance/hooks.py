@@ -78,7 +78,9 @@ class ForwardCapture:
         if self.active is None:
             return
         if torch.npu.device_count() != 1:
-            raise RuntimeError("Step 12 requires exactly one visible NPU")
+            raise RuntimeError(
+                "Performance measurement requires exactly one visible NPU"
+            )
         self.before = memory_snapshot()
         if not self.startup_recorded:
             startup = dict(
@@ -169,7 +171,7 @@ def install(directory: Path):
             torch.npu.synchronize()
             elapsed = (time.perf_counter() - start) * 1000
         elif active["phase"] == "profile":
-            with torch.profiler.record_function(f"homework12.{kind}"):
+            with torch.profiler.record_function(f"homework.performance.{kind}"):
                 result = original(self, *args, **kwargs)
         else:
             result = original(self, *args, **kwargs)
