@@ -742,6 +742,12 @@ asynchronous so it does not stall forward launches.
 The sampler precomputes the configured length's floor, fractional part and
 integer flag at initialization and reuses them for each buffer refresh.
 
+Prefill sampling uses a separate offset table keyed by each prompt chunk's
+last input position. It must preserve `RuntimeStates.valid_cache_lengths`: only
+accepted-frontier advancement publishes consumed inputs. Build the sampling
+offsets on an explicit clone before indexed writes; accelerator implementations
+of functional indexed operations can otherwise modify the live frontier.
+
 ### Non-speculative serving is the N == 1 case, not a second path
 
 One sampling rule for every batch: **prefill requests sample, decode

@@ -1,66 +1,95 @@
 # Recorded Step 11 validation
 
-The notebook executes successfully as an evaluation program. The model's eager
-cached-decode correctness gate currently **fails**. Runtime/kernel code was not
-changed as part of this evaluation work.
+The prefill sampling-offset implementation now preserves the live accepted
+cache frontier. The full default notebook matrix has **1,059 passing and five
+failing tensor comparisons**. All position and whole-model logit comparisons
+pass; the strict long-sequence state gate remains failing.
 
-## Restart-and-run-all evidence
+## Full-matrix evidence after the frontier fix
 
-[Run report](../../outputs/homework1/correctness/runs/20261018T185139Z_947acc98/report.md),
-[manifest](../../outputs/homework1/correctness/runs/20261018T185139Z_947acc98/manifest.json),
-and [executed notebook](../../outputs/homework1/correctness/executed_11_correctness_final.ipynb).
-These generated files remain ignored; the notebook reproduces them locally.
+[Run report](../../outputs/homework1/correctness/runs/20261019T160802Z_620a51ca/report.md),
+[summary](../../outputs/homework1/correctness/runs/20261019T160802Z_620a51ca/summary.json),
+and [executed notebook](../../outputs/homework1/correctness/executed_11_correctness_20261019T160755Z.ipynb).
+Generated evidence remains ignored; the notebook reproduces it locally.
 
-This run used raw lengths **1, 3, 129** and all four chat fixtures, four
-teacher-forced outputs and at most four free outputs. It used the pinned local
-Qwen3.5-0.8B checkpoint, BF16 eager Ascend execution with FP32 recurrent state,
-and independent eager HF CPU FP32/BF16 references. Both implementations stopped
-on the explicit EOS set `[248044, 248046]`. This is a declared subset of the
-notebook's default length matrix, not a passing result for unexecuted lengths.
+This run used raw lengths **1, 3, 4, 5, 127, 128, 129, 512, 2048** and all four
+chat fixtures, four teacher-forced outputs and at most 16 free outputs. It used
+the pinned local Qwen3.5-0.8B checkpoint, BF16 eager Ascend execution with FP32
+recurrent state, and independent eager HF CPU FP32/BF16 references. Both
+implementations used the explicit EOS set `[248044, 248046]`.
 
 | Check | Passed | Failed |
 | --- | ---: | ---: |
-| Evaluation infrastructure tests | 12 | 0 |
+| Frontier regression and evaluation infrastructure tests | 16 | 0 |
 | Existing NPU operator tests | 278 | 0 |
-| CPU BF16/FP32 model/layer/state rounding baselines | 112 | 0 |
-| Real GDN decoder output, convolution history and recurrent state | 84 | 0 |
-| Whole-model raw/centered logits using identical captured positions | 56 | 0 |
-| Exact canonical text position checks | 10 | 18 |
-| Independent versus batched/fresh requests, intermediate outputs and states | 544 | 0 |
+| CPU BF16/FP32 whole-model rounding baselines | 52 | 0 |
+| CPU BF16/FP32 layer/state rounding baselines | 152 | 4 |
+| Real GDN decoder output, convolution history and recurrent state | 155 | 1 |
+| Exact canonical text positions | 52 | 0 |
+| Whole-model raw/centered logits | 104 | 0 |
+| Independent versus batched/fresh outputs and states | 544 | 0 |
 
-There were **806 passing and 18 failing tensor comparisons**. Real two-request
-batches and physical state-block reuse were both observed. No reference/operator
-checks were skipped or unavailable in this run. Free generation matched exactly
-in **6/7** cases; the Chinese fixture first differed at output index 2, where the
-reference top-two margin was approximately **0.010315**. After that point the
-prefixes differ; later numerical values are not teacher-forced evidence.
+No checks were skipped or unavailable. Real two-request batches and physical
+state-block reuse were observed. Free generation matched in **12/13** cases,
+compared with **9/13** before the fix. The Chinese fixture first differs at
+output index 2, where the reference top-two logit margin is approximately
+**0.010315**. Subsequent outputs use different prefixes and are not
+teacher-forced arithmetic comparisons.
 
-The position failures are material. A three-token prompt is followed by native
-positions `5, 6, 7`, whereas canonical cached text positions are `3, 4, 5`.
-The reference receives captured native positions when comparing arithmetic,
-while independent exact checks retain this semantic failure. Matching logits
-under matched positions therefore does not clear the cached-position gate.
+## Fixed cache-frontier corruption
 
-## Long-sequence boundary evidence
+On the installed Ascend stack, functional `Tensor.index_copy()` unexpectedly
+modifies its input as well as returning a new tensor. Building prefill sampling
+offsets therefore changed `RuntimeStates.valid_cache_lengths` before accepted
+frontier advancement. A prompt of length `L` started decode at `2L - 1` instead
+of `L`; a 2,048-token prompt started at 4,095.
 
-[2,048-token metrics](../../outputs/homework1/correctness/runs/boundary2048_5c377a3b/metrics.csv),
-[failures](../../outputs/homework1/correctness/runs/boundary2048_5c377a3b/failures.json),
-and [original native log](../../outputs/homework1/correctness/runs/20261018T183641Z_c4504b8f/native/worker.log).
+`_with_prefill_sample_offsets` now clones the frontier before its indexed
+write. CPU/NPU regression tests exercise noncontiguous request slots, existing
+prefix lengths, accepted advancement and next-decode position preparation.
+The full notebook removes all **36 position failures and 12 cached-logit
+failures** seen in the otherwise identical pre-fix full-matrix run
+`20261019T155515Z_22f80dfb`.
 
-The original full-matrix attempt reached the 2,048-token fixture and failed in
-native attention decode: actual KV length **4097** exceeded its **4096**-entry
-buffer. Only prefill and one cached-decode output were available, so the focused
-report explicitly counts missing later steps and the runtime failure.
+## Remaining numerical acceptance failures
 
-The available real GDN layer/state comparisons passed. Two independent CPU
-BF16/FP32 recurrent-state rounding-baseline comparisons exceeded the predeclared
-elementwise criterion: maximum absolute error was about **0.0398**, despite
-relative L2 around **0.0120**. The thresholds were retained; long-state acceptance
-criteria need further justification. Cached raw logits also failed (RMSE about
-**0.659**, relative L2 about **0.189**), along with the exact position check.
-The focused report records 13 passing and 7 failing/unavailable checks in total.
+Four failures are CPU BF16-versus-FP32 reference state comparisons for the
+2,048-token fixture. Their maximum absolute errors are approximately
+**0.0397–0.0415**, with relative L2 around **0.012**. These execute independently
+of the Ascend implementation.
 
-The notebook defaults to a larger explicit context buffer so it can collect
-boundary diagnostics. This does not repair or suppress the independent position
-check. Full default-matrix model correctness, graphs, prefix caching,
-retraction/transfer, vision and performance are not established by these results.
+The fifth is native first-layer recurrent state at the fourth output of that
+fixture: maximum absolute error **0.026789**, RMSE **0.000248**, relative L2
+**0.00786**. One of 262,144 state elements exceeds the fixed
+`0.02 + 0.05 * abs(reference)` criterion. The notebook retains its original
+thresholds and reports this failure explicitly; passing logits does not clear
+the state gate.
+
+An additional exact-input diagnostic captured the first layer's real Q/K/V,
+gates, initial states and kernel results for this fixture. Independent CPU FP64
+recurrence gave maximum state errors of **4.23e-5** after prefill and at most
+**2.56e-7** for each cached step. These are far below the FP32 model-reference
+difference; the evidence points to upstream BF16 rounding rather than an
+incorrect single-token recurrence. This diagnostic does not replace the failed
+whole-layer criterion. See
+[exact-input metrics](../../outputs/homework1/correctness/recurrence_diagnostic/same_inputs_fp64.json).
+The diagnostic directory also retains its worker log, captured tensors and
+standalone scripts.
+
+A subsequent [component trace](../../outputs/homework1/correctness/state_trace/report.md)
+identifies BF16 rounding after convolution/SiLU, especially V, as the dominant
+source at the failing element. Actual NPU kernel replay reproduces all saved
+BF16 states exactly. Promoting the same quantized projections before
+convolution and retaining FP32 convolution outputs clears all state-element
+checks in this fixture's four steps, reducing final maximum error to **0.01111**.
+This is an isolated precision experiment; it has not changed production
+execution or established full-model correctness with that precision policy.
+
+The broader `test/runtime/test_zero_output_prefill.py` run has five failures in
+existing orchestration stand-ins (40 tests pass). The same five failures
+reproduce using unchanged HEAD sources in a temporary directory; they are not
+introduced by the frontier fix. See
+[baseline log](../../outputs/homework1/correctness/runs/20261019T160802Z_620a51ca/baseline_zero_output.log).
+
+Graphs, prefix caching, transfer/retraction, vision and performance are outside
+this eager correctness run.
