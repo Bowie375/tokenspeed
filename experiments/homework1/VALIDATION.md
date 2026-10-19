@@ -93,3 +93,40 @@ introduced by the frontier fix. See
 
 Graphs, prefix caching, transfer/retraction, vision and performance are outside
 this eager correctness run.
+
+
+## Step 12 performance workflow validation
+
+The [performance notebook](notebooks/12_performance.ipynb) completed a real
+single-visible-NPU smoke run on the same pinned checkpoint:
+[report](../../outputs/homework1/performance/runs/20261019T165601Z_3d82ccc9/report.md),
+[summary](../../outputs/homework1/performance/runs/20261019T165601Z_3d82ccc9/summary.json),
+and [executed notebook](../../outputs/homework1/performance/executed_12_performance_smoke_20261019T165600Z.ipynb).
+
+This run used input lengths **128 and 2048**, deliberately reduced fixed output
+lengths **2 and 3**, one warmup per shape/pass, and one measured repetition per
+case/pass. All **20 recorded native requests** were valid: eight warmups, eight
+measured latency/forward requests, two memory requests and two profile requests.
+Unmeasured one-token control requests exported buffered evidence outside timing.
+Each real request executed one complete uncached prefill and exactly `N-1`
+one-token decode forwards. No correctness or sampling overrides were installed.
+
+The real short/long profiles both contain Ascend hardware events. Name-based
+device-duration grouping identifies GDN as the largest observed category in
+these two diagnostic traces; this does not establish a bandwidth or other
+hardware limit. Profiler durations are separate from primary timing and account
+for overlap explicitly. Framework allocated/reserved/peak counters and raw
+idle/allocated/workload `npu-smi` snapshots are retained. The snapshot collection
+can outlast these tiny output sequences, so those device-wide snapshots are
+not claimed as precisely timed workload HBM peaks.
+
+All **32 experiment infrastructure tests** passed, including 20 new performance
+helper tests. Repository hooks passed, and independent review checked timing
+isolation, partial errors, stream token counts and profile interpretation.
+The captured Python source hashes match the implementation used for this run.
+
+This is workflow smoke coverage, **not** the default 128/2048-input by
+32/128-output, ten-repetition performance baseline. The saved completeness
+flags remain false for that baseline. The notebook retains those full defaults
+for the homework measurement. The five linked Step 11 state-precision failures
+also remain unresolved by this performance work.

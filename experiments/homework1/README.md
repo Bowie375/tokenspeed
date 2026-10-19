@@ -1,4 +1,4 @@
-# Homework 1 numerical evaluation
+# Homework 1 evaluation and performance experiments
 
 Step 11 uses one notebook backed by ordinary Python helpers. Source, fixtures,
 comparisons and native captures have separate lifetimes:
@@ -94,5 +94,96 @@ those IDs are 248046 (`im_end`) and 248044. Comparing each library's implicit
 EOS default would incorrectly report a divergence after an already completed
 arithmetic answer.
 
-See [VALIDATION.md](VALIDATION.md) for recorded coverage, the remaining cached
-position failure, the 2,048-token boundary diagnostics and links to local evidence.
+See [VALIDATION.md](VALIDATION.md) for recorded coverage, the fixed cached-position
+bug, remaining state-precision failures and links to local evidence.
+
+
+## Step 12 performance baseline
+
+Open [12_performance.ipynb](notebooks/12_performance.ipynb), select the activated
+project environment, and restart/run all. Select one free chip before starting
+Jupyter. The notebook loads exact saved Step 11 token-ID fixtures, records the
+checkpoint/source/configuration, and starts a disposable native Engine. It uses
+BF16 eager text inference, FP32 recurrent state, greedy sampling, one request at
+a time, no prefix caching, no overlap and no speculation. The main computation
+runs on the selected NPU. Current numerical failures remain linked in the report;
+benchmarking does not establish full correctness.
+
+Reusable modules live under `performance/`:
+
+- `config.py`: explicit workload/EOS/execution policy and exact Engine options.
+- `measurements.py`: cumulative-stream TTFT/TPOT and median/min/max statistics.
+- `hooks.py`: process-local complete-forward timing, NPU allocator and profiler capture.
+- `worker.py`: fresh streaming requests, warmups and separate measurement passes.
+- `profiling.py`: CPU/device event separation, name-based groups and overlap-aware busy time.
+- `runner.py`, `results.py`: pinned artifacts, isolated process execution and reports.
+
+Defaults cover the four 128/2048-input by 32/128-output combinations, three
+warmups of every shape in each timing pass, then ten repetitions per case/pass.
+The supported Engine `ignore_eos=True` enforces fixed output lengths; natural
+requests can select `natural`, in which case actual lengths and finish reasons
+remain explicit. Each call creates a new request and exercises managed state
+initialization/allocation; no old recurrent state is manually replayed.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HOMEWORK_PERF_MODEL` | local Qwen3.5-0.8B | Local checkpoint; no download |
+| `HOMEWORK_PERF_FIXTURES` | newest compatible Step 11 run | Exact saved fixtures plus generation policy |
+| `HOMEWORK_PERF_INPUT_LENGTHS` | `128,2048` | Two distinct saved raw lengths |
+| `HOMEWORK_PERF_OUTPUT_LENGTHS` | `32,128` | Two distinct output targets |
+| `HOMEWORK_PERF_WARMUPS` | `3` | Warmups per shape in each timing pass |
+| `HOMEWORK_PERF_REPETITIONS` | `10` | Measured repetitions per case/pass |
+| `HOMEWORK_PERF_EOS_POLICY` | `fixed_length` | Explicit `fixed_length` or `natural` |
+| `HOMEWORK_PERF_PROFILE` | `1` | Collect short/long warmed CPU+NPU profiles |
+
+For infrastructure smoke validation, use output lengths `2,3`, one warmup and
+one repetition. The saved summary labels this as reduced coverage, not a
+successful ten-repetition performance baseline. Keep the default matrix for the
+actual homework report.
+
+Primary timing uses the in-process streaming client, including IPC/scheduling
+and detokenization, rather than HTTP transport. TTFT ends at the first nonempty
+text event. TPOT is `(last token-count arrival - first token-count arrival)/(N-1)`;
+a coalesced first event makes it unavailable. Stream chunks are never assumed
+to correspond one-to-one with tokens. Primary timing adds no device barriers,
+but lightweight scalar/allocator hooks add host overhead. After each request,
+an unmeasured one-token control request flushes buffered evidence and profiles
+on the same forward thread before the next client timer starts.
+
+A separate synchronized pass measures complete `ModelExecutor._forward_step`
+wall time, including model/logits/sampling and state work within that method,
+with Python/launch overhead. Earlier input/attention-metadata preparation,
+scheduler queueing and response transport are excluded. Prefill and decode
+forward times are not labelled pure device-kernel durations, and their samples
+are never mixed with primary latency samples. Every raw decode duration is
+retained; prefill/decode forward counts must match actual generated counts.
+
+Allocator peaks reset at the prompt boundary, after model/cache allocation.
+They include weights, preallocated pools and workspace. Startup peaks and raw
+allocated/reserved bytes are separate from warmed peaks. `npu-smi` device-wide
+snapshots are collected at idle, after allocation and in separate memory
+requests, with explicit collection intervals. Missing tools/APIs are unavailable,
+not zero usage. Results use MiB (`2**20` bytes).
+
+Profiling follows warmup and timing, in separate short/long requests. Raw
+CPU/NPU timelines and recognized device-event groups support bottleneck
+investigation; overlapping duration sums are not wall time, and slow decode
+alone does not demonstrate a memory-bandwidth limit. Unclassified events and
+missing device traces remain visible.
+
+Each unique `outputs/homework1/performance/runs/<run_id>/` contains the manifest,
+requested launch configuration, effective Engine server arguments, fixture copy,
+linked correctness summary, every raw
+request/finish/error, native forward evidence, samples/statistics CSV and JSON,
+HBM snapshots, profiler traces, worker log/status and `report.md`. Failures and
+timeouts retain available evidence. Completed prepared runs can also be launched
+without IPython:
+
+```bash
+python -m experiments.homework1.performance.runner \
+  --directory outputs/homework1/performance/runs/REPLACE_WITH_PREPARED_RUN \
+  --timeout-seconds 7200 --failure-policy record
+```
+
+Use a new `prepare_run(...)` directory for each launch; evidence is never
+silently overwritten. The Python preparation API is shown in the notebook.
