@@ -1,0 +1,39 @@
+{
+  "lengths": [
+    1,
+    7,
+    65,
+    257
+  ],
+  "steps": 16,
+  "reuse_attempts": 4,
+  "allow_bf16_ties": true,
+  "warmups": 1,
+  "repetitions": 3,
+  "concurrency": 4,
+  "context_length": 4096,
+  "capacity": 32768,
+  "chunked_prefill_size": 1024,
+  "max_num_seqs": 4,
+  "seed": 17,
+  "timeout_seconds": 2400,
+  "workloads": [
+    {
+      "input_tokens": 128,
+      "output_tokens": 32
+    },
+    {
+      "input_tokens": 512,
+      "output_tokens": 16
+    }
+  ],
+  "tp1_overrides": {
+    "Qwen3.5-27B": {
+      "context_length": 512,
+      "capacity": 32768,
+      "chunked_prefill_size": 512,
+      "max_num_seqs": 2
+    }
+  },
+  "reference_dtype": "float32"
+}

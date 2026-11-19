@@ -1,3 +1,23 @@
+# Copyright (c) 2026 LightSeek Foundation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -111,9 +131,8 @@ def test_token_reduce_scatter_preserves_rows_and_skips_equal_shard_packing(
         # Simulate reduction of identical peer inputs, selecting this rank's chunk.
         output.copy_(input.chunk(len(counts))[current_rank] * len(counts))
 
-    # Older torch-npu deployments install this collective alias at startup.
     monkeypatch.setattr(
-        hccl_module.dist, "reduce_scatter_single", reduce_scatter, raising=False
+        hccl_module.dist, "reduce_scatter_tensor", reduce_scatter, raising=False
     )
     monkeypatch.setattr(hccl_module.dist, "get_rank", lambda: group[current_rank])
     for current_rank in range(len(counts)):
@@ -127,7 +146,7 @@ def test_token_reduce_scatter_preserves_rows_and_skips_equal_shard_packing(
 def test_single_rank_token_reduce_scatter_needs_no_collective(monkeypatch):
     reduce_scatter = Mock()
     monkeypatch.setattr(
-        hccl_module.dist, "reduce_scatter_single", reduce_scatter, raising=False
+        hccl_module.dist, "reduce_scatter_tensor", reduce_scatter, raising=False
     )
     tensor = torch.ones(8, 4)
     output = HcclBackend().token_reduce_scatter(tensor, (2,), [8])
