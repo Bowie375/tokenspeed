@@ -104,6 +104,7 @@ public:
     // Test/diagnostic view of pdTransferInFlight by request id.
     bool PdTransferPinned(const std::string& request_id) const;
     std::int32_t HostPoolCachedBlocks() const { return coordinator_.NumHostCachedBlocks(); }
+    std::int64_t HostCacheEvictions() const { return coordinator_.HostCacheEvictions(); }
     std::int32_t HostPoolFreeBlocks() const { return coordinator_.NumFreeHostLcmBlocks(); }
     std::int32_t HostPoolPinnedBlocks() const { return coordinator_.NumPinnedHostCachedBlocks(); }
     // Published tail boundaries the probe can enumerate, and how many the

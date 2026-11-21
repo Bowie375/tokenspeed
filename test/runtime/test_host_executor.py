@@ -20,6 +20,9 @@ register_cuda_ci(est_time=30, suite="runtime-1gpu")
 
 # Pure Python, no runtime dependencies: the knobs of an L2-only executor.
 from tokenspeed.runtime.cache.l2.sizing import RetractionPoolRequest  # noqa: E402
+from tokenspeed.runtime.cache.transfer.ownership import (  # noqa: E402
+    BlockOwnerTranslation,
+)
 
 NO_POOL = RetractionPoolRequest(
     host_gb=0.0, ratio=0.0, max_retracted_requests=0, tail_lcm_blocks_per_request=0
@@ -80,15 +83,21 @@ def _load_executor_module_without_triton(*, force_isolated=False):
 
     if not force_isolated:
         executor_name = "tokenspeed.runtime.cache.l2.executor"
-        if executor_name in sys.modules or util.find_spec("tokenspeed_triton"):
+        if (
+            executor_name in sys.modules
+            or util.find_spec("tokenspeed_triton")
+            or util.find_spec("torch_npu")
+        ):
             return import_module("tokenspeed.runtime.cache.l2.executor")
     host_transfer = ModuleType("tokenspeed_kernel.ops.kvcache.host_transfer")
     host_transfer.HostTransferWorkspace = Mock
     host_transfer.build_host_transfer_geometry = Mock()
     host_transfer.transfer_cache_blocks = Mock()
     host_transfer.wait_layer_ready = Mock()
+    # Ownership translation is CPU-only and remains part of the real executor
+    # contract even when GPU execution dependencies are unavailable.
     ownership = ModuleType("tokenspeed.runtime.cache.transfer.ownership")
-    ownership.BlockOwnerTranslation = Mock
+    ownership.BlockOwnerTranslation = BlockOwnerTranslation
     lanes = ModuleType("tokenspeed.runtime.cache.transfer.lanes")
     lanes.CompletionQueue = Mock
     lanes.HostTransferLane = Mock

@@ -428,6 +428,7 @@ public:
     bool ContainsHostCachedBlock(const CacheKey& key) const;
     bool IsHostCachedBlock(CacheBlockLocation location) const;
     std::int32_t NumHostCachedBlocks() const;
+    std::int64_t HostCacheEvictions() const { return host_cache_evictions_; }
     std::int32_t NumPinnedHostCachedBlocks() const;
     void CacheHostBlock(CacheBlockRef& block_ref, const CacheKey& key);
     // Publishes a Device block a restore filled from Host L2
@@ -622,6 +623,8 @@ private:
     std::int32_t prefix_granularity_{0};
     std::int32_t replay_window_tokens_{0};
     std::uint64_t next_access_epoch_{0};
+    // Successful capacity evictions, excluding explicit cache flushes.
+    std::int64_t host_cache_evictions_{0};
     TailTable tails_;
     std::vector<StoreCandidate> pending_stores_;
     std::unordered_set<CacheKey, CacheKeyHash> storage_keys_;
